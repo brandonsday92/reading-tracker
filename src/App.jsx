@@ -1,94 +1,219 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 
-const TODAY = new Date();
-TODAY.setHours(0, 0, 0, 0);
+// ─── BRAND TOKENS ─────────────────────────────────────────────────────────────
+const C = {
+  teal:       "#2C5F5D",
+  tealLight:  "#3A7A77",
+  gold:       "#C8A24D",
+  goldLight:  "#F0E6C8",
+  paper:      "#FAF8F2",
+  surface:    "#FFFFFF",
+  charcoal:   "#2B2B2B",
+  secondary:  "#6B6B6B",
+  sage:       "#6F9D74",
+  sageBg:     "#EEF5EE",
+  terra:      "#C7774A",
+  terraBg:    "#FAF0EA",
+  border:     "#E6E2D9",
+  shadow:     "0 2px 12px rgba(44,95,93,0.08)",
+  shadowMd:   "0 4px 20px rgba(44,95,93,0.12)",
+};
 
+const T = {
+  heading: "'Cormorant Garamond', Georgia, serif",
+  body:    "'Inter', -apple-system, sans-serif",
+};
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const DAY_LABELS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
-const SPINE_COLORS = ["#7C6FE0","#0FA87C","#E05C3A","#D44F82","#C48A1A","#2A8FD4"];
+const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const SPINE_COLORS = [C.teal, "#4A7C6F", C.gold, "#7A6B4A", "#6F9D74", "#8B6B5D"];
 
 function dkey(d) { return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
 function tkey() { return dkey(TODAY); }
-function parseDate(s) { const [y,m,d] = s.split("-").map(Number); const dt = new Date(y,m-1,d); dt.setHours(0,0,0,0); return dt; }
-function toInput(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function parseDate(s) {
+  const [y,m,d] = s.split("-").map(Number);
+  const dt = new Date(y, m-1, d); dt.setHours(0,0,0,0); return dt;
+}
+function toInput(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 function fmtShort(d) { return `${MONTHS[d.getMonth()].slice(0,3)} ${d.getDate()}`; }
-function fmtFull(d) { return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; }
+function fmtFull(d)  { return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; }
 
 function buildReadingDays(preset, customSet, startDate, dueDate) {
-  const days = [];
-  const cur = new Date(startDate);
+  const days = []; const cur = new Date(startDate);
   while (cur <= dueDate) {
-    const dow = cur.getDay();
-    let add = false;
-    if (preset === "daily") add = true;
+    const dow = cur.getDay(); let add = false;
+    if (preset === "daily")    add = true;
     else if (preset === "weekdays") add = dow >= 1 && dow <= 5;
     else if (preset === "weekends") add = dow === 0 || dow === 6;
-    else if (preset === "custom") add = customSet.has(cur.getTime());
+    else if (preset === "custom")   add = customSet.has(cur.getTime());
     if (add) days.push(dkey(cur));
     cur.setDate(cur.getDate() + 1);
   }
   return days;
 }
 
-// ─── STORAGE ─────────────────────────────────────────────────────────────────
-const STORAGE_KEY = "reading_tracker_books_v1";
-
-function loadBooks() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+function getAdaptiveGoal(book) {
+  const left = Math.max(0, book.totalPages - book.pagesRead);
+  if (left === 0) return 0;
+  const future  = book.readingDays.filter(d => parseDate(d) > TODAY).length;
+  const isToday = book.readingDays.includes(tkey());
+  return Math.ceil(left / Math.max(1, future + (isToday ? 1 : 0)));
 }
 
-function saveBooks(books) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); } catch {}
+function getScheduleStatus(book) {
+  const ag = getAdaptiveGoal(book);
+  if (ag === 0) return { label: "Final page reached", dot: "✓", color: C.sage };
+  if (ag < book.basePPD)  return { label: "Ahead of schedule", dot: "●", color: C.sage };
+  if (ag === book.basePPD) return { label: "On schedule", dot: "●", color: C.gold };
+  return { label: `${Math.round((ag - book.basePPD) / book.basePPD)} day${ag - book.basePPD > book.basePPD ? "s" : ""} behind`, dot: "●", color: C.terra };
 }
 
-// ─── MINI CALENDAR ───────────────────────────────────────────────────────────
-const navBtn = {
-  padding: "5px 10px", border: "1px solid #2A2250", borderRadius: 8,
-  background: "none", color: "#9B8FC4", cursor: "pointer", fontSize: 14
-};
+function calcStreak(book) {
+  let s = 0; const cur = new Date(TODAY);
+  for (let i = 0; i < 365; i++) {
+    const k = dkey(cur);
+    if (book.readingDays.includes(k)) {
+      if ((book.dailyTotals[k] || 0) >= book.basePPD) s++;
+      else break;
+    }
+    cur.setDate(cur.getDate() - 1);
+  }
+  return s;
+}
 
+// ─── LOCAL STORAGE ────────────────────────────────────────────────────────────
+const STORE = "pace_books_v1";
+function loadBooks() { try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch { return []; } }
+function saveBooks(b) { try { localStorage.setItem(STORE, JSON.stringify(b)); } catch {} }
+
+// ─── SHARED UI COMPONENTS ─────────────────────────────────────────────────────
+
+function PaceLogo({ size = 28 }) {
+  // Bookmark icon — the Pace visual identity
+  return (
+    <svg width={size} height={size * 1.2} viewBox="0 0 28 34" fill="none">
+      <path d="M4 2h20a2 2 0 0 1 2 2v28l-12-7L2 32V4a2 2 0 0 1 2-2z" fill={C.teal} />
+      <path d="M4 2h20a2 2 0 0 1 2 2v28l-12-7L2 32V18h24" stroke="none" fill={C.tealLight} opacity="0.3" />
+    </svg>
+  );
+}
+
+function BookmarkProgress({ pct, size = 32 }) {
+  const fill = Math.max(0, Math.min(1, pct / 100));
+  const totalH = size * 1.2;
+  const fillH  = totalH * fill;
+  return (
+    <svg width={size} height={totalH} viewBox="0 0 32 38" fill="none">
+      <path d="M4 2h24a2 2 0 0 1 2 2v34l-16-9L0 38V4a2 2 0 0 1 2-2z" fill={C.border} />
+      <clipPath id={`bp-${size}`}>
+        <rect x="0" y={38 - 38 * fill} width="32" height={38 * fill} />
+      </clipPath>
+      <path d="M4 2h24a2 2 0 0 1 2 2v34l-16-9L0 38V4a2 2 0 0 1 2-2z" fill={C.teal} clipPath={`url(#bp-${size})`} />
+    </svg>
+  );
+}
+
+function TopBar({ title, onBack, rightAction }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", padding:"18px 20px 0", gap:12 }}>
+      {onBack && (
+        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:"6px 8px 6px 0", color:C.secondary, fontSize:20, lineHeight:1 }}>
+          ←
+        </button>
+      )}
+      <span style={{ flex:1, fontFamily:T.heading, fontSize:22, fontWeight:500, color:C.charcoal }}>{title}</span>
+      {rightAction}
+    </div>
+  );
+}
+
+function Label({ children }) {
+  return <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:6 }}>{children}</div>;
+}
+
+function PaceInput({ style={}, ...props }) {
+  return (
+    <input {...props} style={{
+      width:"100%", padding:"13px 15px", fontSize:15, fontFamily:T.body,
+      border:`1px solid ${C.border}`, borderRadius:14, background:C.surface,
+      color:C.charcoal, marginBottom:16, outline:"none",
+      boxShadow:"0 1px 4px rgba(44,95,93,0.06)", WebkitAppearance:"none", ...style
+    }} />
+  );
+}
+
+function BtnPrimary({ onClick, children, style={} }) {
+  return (
+    <button onClick={onClick} style={{
+      width:"100%", padding:"15px", fontSize:15, fontWeight:600, fontFamily:T.body,
+      background:C.teal, color:"#fff", border:"none", borderRadius:16, cursor:"pointer",
+      boxShadow:C.shadow, marginTop:6, letterSpacing:".01em", ...style
+    }}>{children}</button>
+  );
+}
+
+function BtnSecondary({ onClick, children, style={} }) {
+  return (
+    <button onClick={onClick} style={{
+      width:"100%", padding:"14px", fontSize:15, fontWeight:500, fontFamily:T.body,
+      background:C.surface, color:C.teal, border:`1.5px solid ${C.teal}`,
+      borderRadius:16, cursor:"pointer", marginTop:6, ...style
+    }}>{children}</button>
+  );
+}
+
+function Card({ children, style={}, onClick }) {
+  return (
+    <div onClick={onClick} style={{
+      background:C.surface, border:`1px solid ${C.border}`, borderRadius:20,
+      padding:"18px 20px", marginBottom:12, boxShadow:C.shadow,
+      cursor: onClick ? "pointer" : "default", ...style
+    }}>{children}</div>
+  );
+}
+
+function Divider() {
+  return <div style={{ height:1, background:C.border, margin:"16px 0" }} />;
+}
+
+// ─── MINI CALENDAR ────────────────────────────────────────────────────────────
 function MiniCalendar({ calState, onShift, selectedTime, onSelect, readingSet, dueTime, mode }) {
   const { y, m } = calState;
   const firstDay = new Date(y, m, 1).getDay();
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
   const todayTime = TODAY.getTime();
 
   return (
-    <div style={{ background: "#13102A", border: "1px solid #2A2250", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <button onClick={() => onShift(-1)} style={navBtn}>‹</button>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#EEE9FF" }}>{MONTHS[m]} {y}</span>
-        <button onClick={() => onShift(1)} style={navBtn}>›</button>
+    <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:16, marginBottom:16 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+        <button onClick={() => onShift(-1)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:10, padding:"5px 11px", color:C.secondary, cursor:"pointer", fontSize:15 }}>‹</button>
+        <span style={{ fontFamily:T.heading, fontSize:17, color:C.charcoal, fontWeight:500 }}>{MONTHS[m]} {y}</span>
+        <button onClick={() => onShift(1)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:10, padding:"5px 11px", color:C.secondary, cursor:"pointer", fontSize:15 }}>›</button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3 }}>
-        {DAY_LABELS.map(l => (
-          <div key={l} style={{ fontSize: 10, color: "#4A3E6A", textAlign: "center", paddingBottom: 4 }}>{l}</div>
-        ))}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
+        {DAYS.map(l => <div key={l} style={{ fontSize:10, color:C.border, textAlign:"center", paddingBottom:6, fontWeight:600, letterSpacing:".04em" }}>{l}</div>)}
         {Array(firstDay).fill(null).map((_,i) => <div key={`e${i}`} />)}
-        {Array(daysInMonth).fill(null).map((_, i) => {
-          const d = i + 1;
-          const dt = new Date(y, m, d);
-          const t = dt.getTime();
-          const isPast = dt < TODAY;
-          const isBeyondDue = dueTime && t > dueTime;
-          const isSel = mode === "due" ? (selectedTime && t === selectedTime) : (readingSet && readingSet.has(t));
-          const isToday = t === todayTime;
-          const disabled = isPast || isBeyondDue;
+        {Array(daysInMonth).fill(null).map((_,i) => {
+          const d = i+1, dt = new Date(y,m,d), t = dt.getTime();
+          const isPast      = dt < TODAY;
+          const beyondDue   = dueTime && t > dueTime;
+          const isSel       = mode === "due" ? selectedTime && t === selectedTime : readingSet && readingSet.has(t);
+          const isToday     = t === todayTime;
+          const disabled    = isPast || beyondDue;
           return (
-            <div key={d} onClick={() => !disabled && onSelect(t, dt)}
-              style={{
-                aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 12, borderRadius: mode === "due" && isSel ? "50%" : 8,
-                border: isToday && !isSel ? "1px solid #7C6FE0" : "1px solid transparent",
-                background: isSel ? "#7C6FE0" : "transparent",
-                color: disabled ? "#2A2250" : isSel ? "#fff" : "#C4B8E8",
-                cursor: disabled ? "default" : "pointer",
-              }}>
-              {d}
-            </div>
+            <div key={d} onClick={() => !disabled && onSelect(t, dt)} style={{
+              aspectRatio:"1", display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:13, borderRadius: isSel && mode==="due" ? "50%" : 8,
+              background: isSel ? C.teal : "transparent",
+              border: isToday && !isSel ? `1.5px solid ${C.teal}` : "1.5px solid transparent",
+              color: disabled ? C.border : isSel ? "#fff" : C.charcoal,
+              cursor: disabled ? "default" : "pointer",
+              fontWeight: isToday ? 600 : 400,
+            }}>{d}</div>
           );
         })}
       </div>
@@ -96,307 +221,410 @@ function MiniCalendar({ calState, onShift, selectedTime, onSelect, readingSet, d
   );
 }
 
-// ─── SHARED UI ───────────────────────────────────────────────────────────────
-function Label({ children }) {
-  return <div style={{ fontSize: 11, color: "#4A3E6A", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>{children}</div>;
-}
+// ─── SHELF SCREEN ─────────────────────────────────────────────────────────────
+function Shelf({ books, onOpen, onAdd }) {
+  const todayBooks = books.filter(b => b.pagesRead < b.totalPages && b.readingDays.includes(tkey()));
+  const otherBooks = books.filter(b => !todayBooks.includes(b));
 
-function Input({ style = {}, ...props }) {
   return (
-    <input {...props} style={{
-      width: "100%", padding: "11px 13px", fontSize: 14,
-      border: "1px solid #2A2250", borderRadius: 12,
-      background: "#13102A", color: "#EEE9FF", marginBottom: 14,
-      outline: "none", WebkitAppearance: "none", ...style
-    }} />
-  );
-}
+    <div style={{ minHeight:"100vh", background:C.paper }}>
+      {/* Header */}
+      <div style={{ padding:"24px 20px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <PaceLogo size={28} />
+          <span style={{ fontFamily:T.heading, fontSize:28, fontWeight:500, color:C.charcoal, letterSpacing:"-.01em" }}>Pace</span>
+        </div>
+        <button onClick={onAdd} style={{
+          background:C.teal, color:"#fff", border:"none", borderRadius:20,
+          padding:"9px 18px", fontSize:13, fontWeight:600, fontFamily:T.body, cursor:"pointer", boxShadow:C.shadow
+        }}>+ Add book</button>
+      </div>
 
-function Btn({ variant, onClick, children, style = {} }) {
-  const styles = {
-    purple: { background: "linear-gradient(135deg,#7C6FE0,#534AB7)", color: "#fff", border: "none" },
-    ghost:  { background: "#13102A", color: "#9B8FC4", border: "1px solid #2A2250" },
-  };
-  return (
-    <button onClick={onClick} style={{
-      width: "100%", padding: 13, fontSize: 14, fontWeight: 600,
-      borderRadius: 12, cursor: "pointer", display: "flex",
-      alignItems: "center", justifyContent: "center", gap: 7, marginTop: 6,
-      ...styles[variant], ...style
-    }}>
-      {children}
-    </button>
-  );
-}
-
-function Badge({ color, bg, border, children }) {
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12,
-      fontWeight: 500, padding: "5px 11px", borderRadius: 20,
-      background: bg, border: `1px solid ${border}`, color
-    }}>
-      {children}
-    </span>
-  );
-}
-
-function StatCard({ label, value, sub }) {
-  return (
-    <div style={{ background: "#13102A", border: "1px solid #2A2250", borderRadius: 14, padding: 14 }}>
-      <div style={{ fontSize: 10, color: "#4A3E6A", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: "#EEE9FF" }}>{value}</div>
-      <div style={{ fontSize: 11, color: "#4A3E6A", marginTop: 3 }}>{sub}</div>
+      <div style={{ padding:"20px 20px 80px" }}>
+        {books.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"4rem 1rem" }}>
+            <BookmarkProgress pct={0} size={48} />
+            <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginTop:20, marginBottom:8 }}>
+              Your next story is waiting.
+            </div>
+            <div style={{ fontFamily:T.body, fontSize:14, color:C.secondary, marginBottom:28, lineHeight:1.6 }}>
+              Add a book and Pace will figure out<br/>how many pages to read each day.
+            </div>
+            <BtnPrimary onClick={onAdd} style={{ borderRadius:20 }}>Start your first book</BtnPrimary>
+          </div>
+        ) : (
+          <>
+            {todayBooks.length > 0 && (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", marginBottom:12 }}>Today's reading</div>
+                {todayBooks.map((b, i) => <BookCard key={b.id} book={b} onClick={() => onOpen(b.id)} colorIdx={books.indexOf(b)} />)}
+              </>
+            )}
+            {otherBooks.length > 0 && (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", margin:"20px 0 12px" }}>
+                  {todayBooks.length > 0 ? "Other books" : "Your books"}
+                </div>
+                {otherBooks.map(b => <BookCard key={b.id} book={b} onClick={() => onOpen(b.id)} colorIdx={books.indexOf(b)} />)}
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─── ADD BOOK ────────────────────────────────────────────────────────────────
+function BookCard({ book, onClick, colorIdx }) {
+  const pct    = Math.round((book.pagesRead / book.totalPages) * 100);
+  const ag     = getAdaptiveGoal(book);
+  const status = getScheduleStatus(book);
+  const done   = book.pagesRead >= book.totalPages;
+  const spineC = SPINE_COLORS[colorIdx % SPINE_COLORS.length];
+  const due    = parseDate(book.dueDate);
+
+  return (
+    <Card onClick={onClick} style={{ padding:0, overflow:"hidden" }}>
+      <div style={{ display:"flex" }}>
+        {/* Color spine */}
+        <div style={{ width:5, background:spineC, flexShrink:0 }} />
+        <div style={{ flex:1, padding:"16px 18px" }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:6 }}>
+            <div style={{ fontFamily:T.heading, fontSize:19, color:C.charcoal, fontWeight:500, flex:1, marginRight:12, lineHeight:1.2 }}>{book.title}</div>
+            <BookmarkProgress pct={pct} size={22} />
+          </div>
+          {!done && (
+            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
+              <span style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal, lineHeight:1 }}>{ag}</span>
+              <span style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>pages today</span>
+            </div>
+          )}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontFamily:T.body, fontSize:12, color:status.color, display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ fontSize:8 }}>{status.dot}</span>{done ? "Final page reached" : status.label}
+            </span>
+            <span style={{ fontFamily:T.body, fontSize:12, color:C.secondary }}>Due {fmtShort(due)}</span>
+          </div>
+          {/* Progress bar */}
+          <div style={{ height:3, background:C.border, borderRadius:2, marginTop:10, overflow:"hidden" }}>
+            <div style={{ height:"100%", width:`${pct}%`, background:spineC, borderRadius:2, transition:"width .5s" }} />
+          </div>
+          <div style={{ fontFamily:T.body, fontSize:11, color:C.border, marginTop:4, textAlign:"right" }}>{pct}% complete</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ─── ADD BOOK SCREEN ──────────────────────────────────────────────────────────
 function AddBook({ onSave, onBack }) {
-  const [title, setTitle] = useState("");
-  const [pages, setPages] = useState("");
-  const [dueDate, setDueDate] = useState(null);
-  const [dueCal, setDueCal] = useState({ y: TODAY.getFullYear(), m: TODAY.getMonth() });
-  const [readCal, setReadCal] = useState({ y: TODAY.getFullYear(), m: TODAY.getMonth() });
-  const [preset, setPreset] = useState(null);
+  const [title,      setTitle]      = useState("");
+  const [pages,      setPages]      = useState("");
+  const [dueDate,    setDueDate]    = useState(null);
+  const [dueCal,     setDueCal]     = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
+  const [readCal,    setReadCal]    = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
+  const [preset,     setPreset]     = useState(null);
   const [customDays, setCustomDays] = useState(new Set());
 
-  const shiftDue = dir => setDueCal(c => { let m=c.m+dir,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
-  const shiftRead = dir => setReadCal(c => { let m=c.m+dir,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
-  const toggleCustom = t => setCustomDays(prev => { const s=new Set(prev); s.has(t)?s.delete(t):s.add(t); return s; });
+  const shiftDue  = d => setDueCal(c  => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
+  const shiftRead = d => setReadCal(c => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
+  const toggleDay = t => setCustomDays(p => { const s=new Set(p); s.has(t)?s.delete(t):s.add(t); return s; });
 
   const handleSave = () => {
     const p = parseInt(pages);
-    if (!p || p < 1) return alert("Enter total pages.");
-    if (!dueDate) return alert("Pick a finish date.");
-    if (!preset) return alert("Choose reading days.");
-    if (preset === "custom" && customDays.size === 0) return alert("Select at least one day.");
+    if (!p || p < 1)                          return alert("Please enter the total number of pages.");
+    if (!dueDate)                              return alert("Please choose a finish date.");
+    if (!preset)                              return alert("Please choose your reading days.");
+    if (preset==="custom" && !customDays.size) return alert("Please select at least one day.");
     const rdays = buildReadingDays(preset, customDays, TODAY, dueDate);
-    if (!rdays.length) return alert("No reading days found — adjust your schedule.");
-    onSave({ title: title.trim() || "Untitled", totalPages: p, dueDate: dkey(dueDate), readingDays: rdays, basePPD: Math.ceil(p / rdays.length) });
+    if (!rdays.length) return alert("No reading days found — try adjusting your schedule.");
+    onSave({ title: title.trim()||"Untitled", totalPages:p, dueDate:dkey(dueDate), readingDays:rdays, basePPD:Math.ceil(p/rdays.length) });
   };
 
-  const presets = ["daily","weekdays","weekends","custom"];
-  const presetLabels = { daily:"Every day", weekdays:"Weekdays", weekends:"Weekends", custom:"Custom" };
+  const presets = [
+    { key:"daily",    label:"Every day"  },
+    { key:"weekdays", label:"Weekdays"   },
+    { key:"weekends", label:"Weekends"   },
+    { key:"custom",   label:"Custom days"},
+  ];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0E0C1A", color: "#EEE9FF" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 0" }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"#9B8FC4", fontSize:22, cursor:"pointer", padding:4 }}>←</button>
-        <span style={{ fontSize:16, fontWeight:600 }}>Add a book</span>
-      </div>
-      <div style={{ padding: "16px 16px 80px" }}>
+    <div style={{ minHeight:"100vh", background:C.paper }}>
+      <TopBar title="New book" onBack={onBack} />
+      <div style={{ padding:"20px 20px 80px" }}>
+        <p style={{ fontFamily:T.heading, fontSize:17, color:C.secondary, marginBottom:24, fontStyle:"italic" }}>
+          Tell us about your book and we'll handle the math.
+        </p>
+
         <Label>Book title</Label>
-        <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. The Name of the Wind" type="text" />
+        <PaceInput type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. The Remains of the Day" />
+
         <Label>Total pages</Label>
-        <Input value={pages} onChange={e => setPages(e.target.value)} placeholder="e.g. 662" type="number" min="1" />
+        <PaceInput type="number" value={pages} onChange={e=>setPages(e.target.value)} placeholder="e.g. 258" min="1" />
+
         <Label>Finish by</Label>
         <MiniCalendar calState={dueCal} onShift={shiftDue}
           selectedTime={dueDate ? dueDate.getTime() : null}
-          onSelect={(t, dt) => setDueDate(dt)} mode="due" />
+          onSelect={(_,dt) => setDueDate(dt)} mode="due" />
         {dueDate && (
-          <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#1A1640", border:"1px solid #7C6FE0", borderRadius:10, padding:"7px 13px", fontSize:13, color:"#C4B8E8", marginBottom:14 }}>
+          <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.goldLight, border:`1px solid ${C.gold}`, borderRadius:10, padding:"7px 14px", fontSize:13, color:C.charcoal, marginBottom:16, fontFamily:T.body }}>
             📅 {fmtFull(dueDate)}
           </div>
         )}
-        <Label>Reading days</Label>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+
+        <Label>Which days will you read?</Label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
           {presets.map(p => (
-            <div key={p} onClick={() => setPreset(p)} style={{
-              padding:"8px 14px", border:`1px solid ${preset===p?"#7C6FE0":"#2A2250"}`,
-              borderRadius:20, fontSize:13, cursor:"pointer",
-              background: preset===p ? "#7C6FE0" : "#13102A",
-              color: preset===p ? "#fff" : "#9B8FC4"
-            }}>{presetLabels[p]}</div>
+            <div key={p.key} onClick={() => setPreset(p.key)} style={{
+              padding:"9px 16px", border:`1.5px solid ${preset===p.key ? C.teal : C.border}`,
+              borderRadius:20, fontSize:13, cursor:"pointer", fontFamily:T.body,
+              background: preset===p.key ? C.teal : C.surface,
+              color: preset===p.key ? "#fff" : C.charcoal,
+              boxShadow: preset===p.key ? C.shadow : "none",
+              transition:"all .15s",
+            }}>{p.label}</div>
           ))}
         </div>
+
         {preset === "custom" && (
           <>
             <MiniCalendar calState={readCal} onShift={shiftRead} readingSet={customDays}
-              onSelect={t => toggleCustom(t)} dueTime={dueDate ? dueDate.getTime() : null} mode="custom" />
-            <p style={{ fontSize:12, color:"#4A3E6A", marginBottom:14, marginTop:-8 }}>{customDays.size} days selected</p>
+              onSelect={t => toggleDay(t)} dueTime={dueDate ? dueDate.getTime() : null} mode="custom" />
+            <p style={{ fontSize:12, color:C.secondary, marginBottom:16, marginTop:-10, fontFamily:T.body }}>{customDays.size} days selected</p>
           </>
         )}
-        <Btn variant="purple" onClick={handleSave}>✓ Save &amp; see plan</Btn>
-        <Btn variant="ghost" onClick={onBack} style={{ marginTop:10 }}>Cancel</Btn>
+
+        <BtnPrimary onClick={handleSave}>See my reading plan →</BtnPrimary>
+        <BtnSecondary onClick={onBack} style={{ marginTop:10 }}>Cancel</BtnSecondary>
       </div>
     </div>
   );
 }
 
-// ─── PLAN SCREEN ─────────────────────────────────────────────────────────────
+// ─── PLAN SCREEN ──────────────────────────────────────────────────────────────
 function PlanScreen({ book, onStart, onBack }) {
   return (
-    <div style={{ minHeight:"100vh", background:"#0E0C1A", display:"flex", flexDirection:"column" }}>
-      <div style={{ flex:1 }} />
-      <div style={{ background:"#13102A", borderTopLeftRadius:28, borderTopRightRadius:28, padding:"32px 24px 48px", textAlign:"center", border:"1px solid #2A2250", borderBottom:"none" }}>
-        <div style={{ fontSize:11, color:"#4A3E6A", letterSpacing:".08em", textTransform:"uppercase", marginBottom:8 }}>Your daily goal</div>
-        <div style={{ fontSize:64, fontWeight:800, background:"linear-gradient(135deg,#A89EF0,#7C6FE0)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", lineHeight:1.05 }}>{book.basePPD}</div>
-        <div style={{ fontSize:15, color:"#9B8FC4", marginTop:6, marginBottom:20 }}>pages per day</div>
-        <div style={{ height:1, background:"#2A2250", margin:"0 0 20px" }} />
-        <div style={{ fontSize:13, color:"#4A3E6A", marginBottom:28 }}>
-          {book.readingDays.length} reading days · finish by {fmtShort(parseDate(book.dueDate))}
+    <div style={{ minHeight:"100vh", background:C.paper, display:"flex", flexDirection:"column" }}>
+      <TopBar title="" onBack={onBack} />
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
+        <BookmarkProgress pct={0} size={56} />
+        <div style={{ fontFamily:T.heading, fontSize:17, color:C.secondary, marginTop:24, marginBottom:8, letterSpacing:".02em" }}>
+          Your daily reading goal
         </div>
-        <Btn variant="purple" onClick={onStart}>Start tracking →</Btn>
-        <Btn variant="ghost" onClick={onBack} style={{ marginTop:10 }}>← Back</Btn>
+        <div style={{ fontFamily:T.body, fontSize:72, fontWeight:600, color:C.teal, lineHeight:1, marginBottom:4 }}>
+          {book.basePPD}
+        </div>
+        <div style={{ fontFamily:T.heading, fontSize:22, color:C.secondary, marginBottom:28, fontStyle:"italic" }}>pages per day</div>
+
+        <Card style={{ width:"100%", textAlign:"center", background:C.goldLight, border:`1px solid ${C.gold}` }}>
+          <div style={{ fontFamily:T.body, fontSize:13, color:C.charcoal, lineHeight:1.7 }}>
+            <strong>{book.readingDays.length}</strong> reading days ·
+            finish by <strong>{fmtShort(parseDate(book.dueDate))}</strong>
+          </div>
+          <div style={{ fontFamily:T.heading, fontSize:15, color:C.secondary, marginTop:6, fontStyle:"italic" }}>
+            One page at a time.
+          </div>
+        </Card>
+      </div>
+      <div style={{ padding:"0 20px 40px" }}>
+        <BtnPrimary onClick={onStart}>Begin tracking</BtnPrimary>
+        <BtnSecondary onClick={onBack} style={{ marginTop:10 }}>← Adjust plan</BtnSecondary>
       </div>
     </div>
   );
 }
 
-// ─── TRACKER ─────────────────────────────────────────────────────────────────
-function Tracker({ book, onUpdate, onBack, onDelete }) {
+// ─── TRACKER SCREEN ───────────────────────────────────────────────────────────
+function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
   const [logPages, setLogPages] = useState("");
-  const [logDate, setLogDate] = useState(toInput(TODAY));
+  const [logDate,  setLogDate]  = useState(toInput(TODAY));
 
-  const left = Math.max(0, book.totalPages - book.pagesRead);
-  const pct = Math.round((book.pagesRead / book.totalPages) * 100);
-
-  const getAdaptiveGoal = () => {
-    if (left === 0) return 0;
-    const future = book.readingDays.filter(d => parseDate(d) > TODAY).length;
-    const isToday = book.readingDays.includes(tkey());
-    return Math.ceil(left / Math.max(1, future + (isToday ? 1 : 0)));
-  };
-
-  const calcStreak = () => {
-    let s = 0;
-    const cur = new Date(TODAY);
-    for (let i = 0; i < 365; i++) {
-      const k = dkey(cur);
-      if (book.readingDays.includes(k)) {
-        if ((book.dailyTotals[k] || 0) >= book.basePPD) s++;
-        else break;
-      }
-      cur.setDate(cur.getDate() - 1);
-    }
-    return s;
-  };
-
-  const ag = getAdaptiveGoal();
-  const streak = calcStreak();
-  const todayRead = book.dailyTotals[tkey()] || 0;
-  const done = book.pagesRead >= book.totalPages;
-  const goalRecalced = ag !== book.basePPD && !done;
+  const left   = Math.max(0, book.totalPages - book.pagesRead);
+  const pct    = Math.round((book.pagesRead / book.totalPages) * 100);
+  const ag     = getAdaptiveGoal(book);
+  const status = getScheduleStatus(book);
+  const streak = calcStreak(book);
+  const done   = book.pagesRead >= book.totalPages;
+  const todayRead  = book.dailyTotals[tkey()] || 0;
+  const goalMet    = todayRead >= ag;
+  const goalRecalc = ag !== book.basePPD && !done;
+  const spineC     = SPINE_COLORS[colorIdx % SPINE_COLORS.length];
 
   const handleLog = () => {
     const val = parseInt(logPages);
     if (!val || val < 1) return alert("Enter pages read.");
-    if (!logDate) return alert("Pick a date.");
-    if (done) return alert("Book already complete!");
-    const toLog = Math.min(val, left);
+    if (!logDate)        return alert("Pick a date.");
+    if (done)            return alert("You've already reached the final page.");
+    const toLog   = Math.min(val, left);
     const updated = {
       ...book,
       pagesRead: book.pagesRead + toLog,
-      dailyTotals: { ...book.dailyTotals, [logDate]: (book.dailyTotals[logDate] || 0) + toLog },
-      log: [...book.log, { date: logDate, pages: toLog, ts: new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }) }]
+      dailyTotals: { ...book.dailyTotals, [logDate]: (book.dailyTotals[logDate]||0) + toLog },
+      log: [...book.log, { date:logDate, pages:toLog, ts:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) }]
     };
     onUpdate(updated);
     setLogPages("");
   };
 
-  const handleDeleteLog = i => {
+  const handleDelete = i => {
     const e = book.log[i];
-    const updated = {
+    onUpdate({
       ...book,
       pagesRead: Math.max(0, book.pagesRead - e.pages),
-      dailyTotals: { ...book.dailyTotals, [e.date]: Math.max(0, (book.dailyTotals[e.date] || 0) - e.pages) },
-      log: book.log.filter((_, idx) => idx !== i)
-    };
-    onUpdate(updated);
+      dailyTotals: { ...book.dailyTotals, [e.date]: Math.max(0,(book.dailyTotals[e.date]||0)-e.pages) },
+      log: book.log.filter((_,idx) => idx !== i)
+    });
   };
 
-  const dots = Array(7).fill(null).map((_, i) => {
-    const d = new Date(TODAY); d.setDate(d.getDate() - (6 - i));
+  const dots = Array(7).fill(null).map((_,i) => {
+    const d = new Date(TODAY); d.setDate(d.getDate()-(6-i));
     const k = dkey(d);
-    const hit = book.readingDays.includes(k) && (book.dailyTotals[k] || 0) >= book.basePPD;
-    return { label: DAY_LABELS[d.getDay()], hit, isToday: i === 6 };
+    const isReadDay = book.readingDays.includes(k);
+    const hit = isReadDay && (book.dailyTotals[k]||0) >= book.basePPD;
+    return { label:DAYS[d.getDay()], hit, isToday:i===6, isReadDay };
   });
 
   return (
-    <div style={{ minHeight:"100vh", background:"#0E0C1A", color:"#EEE9FF" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"16px 16px 0" }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"#9B8FC4", fontSize:22, cursor:"pointer", padding:4 }}>←</button>
-        <span style={{ fontSize:16, fontWeight:600, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{book.title}</span>
-        <button onClick={onDelete} style={{ background:"none", border:"none", color:"#4A3E6A", fontSize:18, cursor:"pointer", padding:4 }}>🗑</button>
-      </div>
-      <div style={{ padding:"14px 16px 80px" }}>
-        <div style={{ fontSize:13, color:"#4A3E6A", marginBottom:14 }}>{book.totalPages} pages · Due {fmtShort(parseDate(book.dueDate))}</div>
+    <div style={{ minHeight:"100vh", background:C.paper }}>
+      <TopBar
+        title={book.title}
+        onBack={onBack}
+        rightAction={
+          <button onClick={onDelete} style={{ background:"none", border:"none", cursor:"pointer", color:C.border, fontSize:18, padding:6 }}>🗑</button>
+        }
+      />
 
-        {streak > 0 && (
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:7, background:"#2A1E0A", border:"1px solid #B87D1A", borderRadius:12, padding:"9px 14px", fontSize:13, fontWeight:600, color:"#E0B45A", marginBottom:14 }}>
-            🔥 {streak}-day streak
+      <div style={{ padding:"16px 20px 80px" }}>
+        <p style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom:20 }}>
+          {book.totalPages} pages · Due {fmtShort(parseDate(book.dueDate))}
+        </p>
+
+        {/* Today's goal hero */}
+        {!done && (
+          <Card style={{ background:C.teal, border:"none", textAlign:"center", padding:"24px 20px" }}>
+            <div style={{ fontFamily:T.body, fontSize:12, color:"rgba(255,255,255,.65)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:8 }}>
+              Read today's pages
+            </div>
+            <div style={{ fontFamily:T.body, fontSize:64, fontWeight:600, color:"#fff", lineHeight:1 }}>{ag}</div>
+            <div style={{ fontFamily:T.heading, fontSize:18, color:"rgba(255,255,255,.75)", fontStyle:"italic", marginTop:4, marginBottom:16 }}>pages today</div>
+            {book.pagesRead > 0 && (
+              <div style={{ fontFamily:T.body, fontSize:13, color:"rgba(255,255,255,.7)" }}>
+                p.{book.pagesRead} → p.{Math.min(book.totalPages, book.pagesRead + ag)}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {done && (
+          <Card style={{ background:C.sageBg, border:`1px solid ${C.sage}`, textAlign:"center", padding:"28px 20px" }}>
+            <BookmarkProgress pct={100} size={44} />
+            <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginTop:16, marginBottom:6 }}>You reached the final page.</div>
+            <div style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>{book.title}</div>
+          </Card>
+        )}
+
+        {/* Status & streak row */}
+        <div style={{ display:"flex", gap:10, marginTop:12 }}>
+          <div style={{ flex:1, background:C.surface, border:`1px solid ${C.border}`, borderRadius:14, padding:"12px 14px", boxShadow:C.shadow }}>
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Schedule</div>
+            <div style={{ fontFamily:T.body, fontSize:13, color:status.color, display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
+              <span style={{ fontSize:8 }}>●</span> {status.label}
+            </div>
+          </div>
+          {streak > 0 && (
+            <div style={{ flex:1, background:C.goldLight, border:`1px solid ${C.gold}`, borderRadius:14, padding:"12px 14px" }}>
+              <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Steady reading</div>
+              <div style={{ fontFamily:T.body, fontSize:13, color:C.charcoal, fontWeight:500 }}>{streak} day{streak!==1?"s":""} in a row</div>
+            </div>
+          )}
+        </div>
+
+        {/* Pages left */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
+          <Card style={{ padding:"14px 16px", marginBottom:0 }}>
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Pages left</div>
+            <div style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.charcoal }}>{left}</div>
+            <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary }}>of {book.totalPages}</div>
+          </Card>
+          <Card style={{ padding:"14px 16px", marginBottom:0 }}>
+            <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Read so far</div>
+            <div style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal }}>{book.pagesRead}</div>
+            <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary }}>{pct}% complete</div>
+          </Card>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ height:6, background:C.border, borderRadius:3, marginTop:14, marginBottom:6, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${pct}%`, background:spineC, borderRadius:3, transition:"width .6s" }} />
+        </div>
+
+        {goalRecalc && (
+          <div style={{ fontFamily:T.body, fontSize:12, color:ag < book.basePPD ? C.sage : C.terra, background: ag < book.basePPD ? C.sageBg : C.terraBg, border:`1px solid ${ag < book.basePPD ? C.sage : C.terra}`, borderRadius:10, padding:"8px 13px", marginTop:10, marginBottom:2 }}>
+            {ag < book.basePPD ? "You're ahead — goal adjusted down." : "Goal adjusted to keep you on track."}
           </div>
         )}
 
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-          <StatCard label="Pages left" value={left} sub={`of ${book.totalPages}`} />
-          <StatCard label="Daily goal" value={ag} sub="pages / day" />
-        </div>
-
-        {goalRecalced && (
-          <div style={{ fontSize:12, color:"#5FD4B0", background:"#0A2E24", border:"1px solid #14A07D", borderRadius:10, padding:"8px 12px", display:"flex", alignItems:"center", gap:7, marginBottom:12 }}>
-            ↻ {ag < book.basePPD ? "Goal reduced — you're ahead!" : "Goal adjusted to keep you on track"}
-          </div>
-        )}
-
-        <div style={{ height:8, background:"#13102A", border:"1px solid #2A2250", borderRadius:4, overflow:"hidden", marginBottom:6 }}>
-          <div style={{ height:"100%", width:`${pct}%`, background:"linear-gradient(90deg,#534AB7,#9B6FD4)", borderRadius:4, transition:"width .5s" }} />
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#4A3E6A", marginBottom:14, alignItems:"center" }}>
-          <span>
-            {done
-              ? <Badge color="#5FD4B0" bg="#0A2E24" border="#14A07D">🏆 Complete!</Badge>
-              : todayRead === 0
-                ? <Badge color="#C4B8E8" bg="#1A1640" border="#7C6FE0">🎯 Goal: {ag} pages</Badge>
-                : todayRead >= ag
-                  ? <Badge color="#5FD4B0" bg="#0A2E24" border="#14A07D">✓ Goal met! {todayRead}/{ag}</Badge>
-                  : <Badge color="#E0B45A" bg="#2A1E0A" border="#B87D1A">📖 {todayRead}/{ag} today</Badge>}
-          </span>
-          <span>{pct}%</span>
-        </div>
-
-        <div style={{ fontSize:10, color:"#4A3E6A", letterSpacing:".08em", textTransform:"uppercase", marginBottom:10 }}>Last 7 days</div>
-        <div style={{ display:"flex", gap:6, marginBottom:18 }}>
-          {dots.map((dot, i) => (
+        {/* 7-day dots */}
+        <Divider />
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10 }}>Days of steady reading</div>
+        <div style={{ display:"flex", gap:6, marginBottom:4 }}>
+          {dots.map((dot,i) => (
             <div key={i} style={{
               flex:1, aspectRatio:"1", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center",
-              fontSize:10, border:`1px solid ${dot.hit ? "#7C6FE0" : dot.isToday ? "#7C6FE0" : "#2A2250"}`,
-              background: dot.hit ? "#7C6FE0" : "#13102A",
-              color: dot.hit ? "#fff" : dot.isToday ? "#9B8FC4" : "#4A3E6A",
+              fontSize:10, fontWeight:500,
+              border:`1.5px solid ${dot.hit ? C.teal : dot.isToday ? C.teal : C.border}`,
+              background: dot.hit ? C.teal : C.paper,
+              color: dot.hit ? "#fff" : dot.isToday ? C.teal : C.secondary,
             }}>{dot.label}</div>
           ))}
         </div>
 
-        <div style={{ fontSize:10, color:"#4A3E6A", letterSpacing:".08em", textTransform:"uppercase", marginBottom:10 }}>Log reading</div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:8, alignItems:"end", marginBottom:6 }}>
+        {/* Log reading */}
+        <Divider />
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:14 }}>Log reading</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:10, alignItems:"end" }}>
           <div>
             <Label>Date</Label>
-            <Input type="date" value={logDate} onChange={e => setLogDate(e.target.value)} max={book.dueDate} style={{ marginBottom:0 }} />
+            <PaceInput type="date" value={logDate} onChange={e=>setLogDate(e.target.value)} max={book.dueDate} style={{ marginBottom:0 }} />
           </div>
           <div>
-            <Label>Pages</Label>
-            <Input type="number" value={logPages} onChange={e => setLogPages(e.target.value)} placeholder="e.g. 40" min="1" style={{ marginBottom:0 }} />
+            <Label>Pages read</Label>
+            <PaceInput type="number" value={logPages} onChange={e=>setLogPages(e.target.value)} placeholder="e.g. 30" min="1" style={{ marginBottom:0 }} />
           </div>
-          <button onClick={handleLog} style={{ padding:"11px 16px", background:"linear-gradient(135deg,#14A07D,#0B7A5E)", border:"none", borderRadius:12, color:"#fff", fontSize:20, cursor:"pointer", lineHeight:1 }}>＋</button>
+          <button onClick={handleLog} style={{
+            padding:"13px 18px", background:C.teal, border:"none", borderRadius:14,
+            color:"#fff", fontSize:20, cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
+            marginBottom:0
+          }}>＋</button>
         </div>
 
-        <div style={{ fontSize:10, color:"#4A3E6A", letterSpacing:".08em", textTransform:"uppercase", margin:"18px 0 10px" }}>History</div>
+        {/* Today's status */}
+        {todayRead > 0 && !done && (
+          <div style={{ fontFamily:T.body, fontSize:13, marginTop:10, padding:"10px 14px", borderRadius:12, background: goalMet ? C.sageBg : C.terraBg, border:`1px solid ${goalMet ? C.sage : C.terra}`, color: goalMet ? C.sage : C.terra }}>
+            {goalMet
+              ? `Today's goal met — ${todayRead} pages read.`
+              : `${todayRead} of ${ag} pages today.`}
+          </div>
+        )}
+
+        {/* Log history */}
+        <Divider />
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10 }}>Reading history</div>
         {book.log.length === 0
-          ? <div style={{ fontSize:13, color:"#2A2250", padding:"10px 0" }}>No entries yet</div>
-          : book.log.slice().reverse().map((e, ri) => {
-              const i = book.log.length - 1 - ri;
-              const dp = parseDate(e.date);
-              const label = e.date === tkey() ? "Today" : fmtShort(dp);
+          ? <div style={{ fontFamily:T.heading, fontSize:16, color:C.secondary, fontStyle:"italic", padding:"8px 0" }}>No entries yet — log your first pages above.</div>
+          : book.log.slice().reverse().map((e,ri) => {
+              const i   = book.log.length-1-ri;
+              const dp  = parseDate(e.date);
+              const lbl = e.date === tkey() ? "Today" : fmtShort(dp);
               return (
-                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"11px 0", borderBottom:"1px solid #13102A" }}>
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}` }}>
                   <div>
-                    <div style={{ fontWeight:600, color:"#EEE9FF", fontSize:13 }}>{label}</div>
-                    <div style={{ fontSize:11, color:"#3A305A", marginTop:2 }}>{e.ts}</div>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal }}>{lbl}</div>
+                    <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, marginTop:2 }}>{e.ts}</div>
                   </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ fontSize:15, fontWeight:700, color:"#7C6FE0" }}>+{e.pages}</span>
-                    <button onClick={() => handleDeleteLog(i)} style={{ background:"none", border:"none", color:"#3A305A", cursor:"pointer", fontSize:16, padding:"3px 6px" }}>✕</button>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontFamily:T.body, fontSize:16, fontWeight:600, color:C.teal }}>+{e.pages} pages</span>
+                    <button onClick={() => handleDelete(i)} style={{ background:"none", border:"none", color:C.border, cursor:"pointer", fontSize:16, padding:"3px 6px" }}>✕</button>
                   </div>
                 </div>
               );
@@ -406,63 +634,20 @@ function Tracker({ book, onUpdate, onBack, onDelete }) {
   );
 }
 
-// ─── SHELF ───────────────────────────────────────────────────────────────────
-function Shelf({ books, onOpen, onAdd }) {
-  return (
-    <div style={{ minHeight:"100vh", background:"#0E0C1A", color:"#EEE9FF" }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 16px 0" }}>
-        <span style={{ fontSize:20, fontWeight:700 }}>📚 My Shelf</span>
-        <button onClick={onAdd} style={{ padding:"8px 14px", background:"linear-gradient(135deg,#7C6FE0,#534AB7)", border:"none", borderRadius:20, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer" }}>＋ Add book</button>
-      </div>
-      <div style={{ padding:"16px 16px 80px" }}>
-        {books.length === 0 ? (
-          <div style={{ textAlign:"center", padding:"3rem 1rem", color:"#2A2250" }}>
-            <div style={{ fontSize:48, marginBottom:14 }}>📖</div>
-            <div style={{ fontSize:14 }}>No books yet.<br />Add one to get started!</div>
-          </div>
-        ) : books.map((b, i) => {
-          const pct = Math.round((b.pagesRead / b.totalPages) * 100);
-          const c = SPINE_COLORS[i % SPINE_COLORS.length];
-          const done = b.pagesRead >= b.totalPages;
-          const daysLeft = b.readingDays.filter(d => parseDate(d) >= TODAY).length;
-          return (
-            <div key={b.id} onClick={() => onOpen(b.id)}
-              style={{ background:"#13102A", border:"1px solid #2A2250", borderRadius:16, padding:"14px 16px", marginBottom:10, cursor:"pointer" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <div style={{ width:5, borderRadius:3, alignSelf:"stretch", background:c, minHeight:52, flexShrink:0 }} />
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:14, fontWeight:600, color:"#EEE9FF", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{b.title}</div>
-                  <div style={{ fontSize:12, color:"#4A3E6A", marginTop:3 }}>
-                    {b.pagesRead}/{b.totalPages} pages · {done ? <span style={{ color:"#14A07D" }}>Complete!</span> : `${daysLeft} days left`}
-                  </div>
-                  <div style={{ height:3, background:"#2A2250", borderRadius:2, marginTop:8, overflow:"hidden" }}>
-                    <div style={{ height:"100%", width:`${pct}%`, background:c, borderRadius:2 }} />
-                  </div>
-                </div>
-                <div style={{ fontSize:13, fontWeight:700, color:c, minWidth:38, textAlign:"right" }}>{pct}%</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [screen, setScreen] = useState("shelf");
-  const [books, setBooks] = useState(() => loadBooks());
-  const [curId, setCurId] = useState(null);
+  const [screen,      setScreen]      = useState("shelf");
+  const [books,       setBooks]       = useState(() => loadBooks());
+  const [curId,       setCurId]       = useState(null);
   const [pendingBook, setPendingBook] = useState(null);
 
-  // Save to localStorage whenever books change
-  useEffect(() => { saveBooks(books); }, [books]);
+  useEffect(() => saveBooks(books), [books]);
 
-  const curBook = books.find(b => b.id === curId);
+  const curBook  = books.find(b => b.id === curId);
+  const colorIdx = books.findIndex(b => b.id === curId);
 
   const handleSaveBook = data => {
-    const book = { ...data, id: "b" + Date.now(), pagesRead: 0, log: [], dailyTotals: {} };
+    const book = { ...data, id:"b"+Date.now(), pagesRead:0, log:[], dailyTotals:{} };
     setPendingBook(book);
     setScreen("plan");
   };
@@ -474,9 +659,7 @@ export default function App() {
     setScreen("track");
   };
 
-  const handleUpdateBook = updated => {
-    setBooks(prev => prev.map(b => b.id === updated.id ? updated : b));
-  };
+  const handleUpdateBook = updated => setBooks(prev => prev.map(b => b.id===updated.id ? updated : b));
 
   const handleDeleteBook = () => {
     if (!window.confirm(`Remove "${curBook.title}" from your shelf?`)) return;
@@ -485,9 +668,9 @@ export default function App() {
     setScreen("shelf");
   };
 
-  if (screen === "shelf")  return <Shelf books={books} onOpen={id => { setCurId(id); setScreen("track"); }} onAdd={() => setScreen("add")} />;
-  if (screen === "add")    return <AddBook onSave={handleSaveBook} onBack={() => setScreen("shelf")} />;
-  if (screen === "plan" && pendingBook) return <PlanScreen book={pendingBook} onStart={handleStartTracker} onBack={() => setScreen("add")} />;
-  if (screen === "track" && curBook)    return <Tracker book={curBook} onUpdate={handleUpdateBook} onBack={() => setScreen("shelf")} onDelete={handleDeleteBook} />;
+  if (screen==="shelf") return <Shelf books={books} onOpen={id=>{setCurId(id);setScreen("track");}} onAdd={()=>setScreen("add")} />;
+  if (screen==="add")   return <AddBook onSave={handleSaveBook} onBack={()=>setScreen("shelf")} />;
+  if (screen==="plan" && pendingBook) return <PlanScreen book={pendingBook} onStart={handleStartTracker} onBack={()=>setScreen("add")} />;
+  if (screen==="track" && curBook)    return <Tracker book={curBook} onUpdate={handleUpdateBook} onBack={()=>setScreen("shelf")} onDelete={handleDeleteBook} colorIdx={colorIdx} />;
   return null;
 }

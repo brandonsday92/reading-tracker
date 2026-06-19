@@ -1,5 +1,5 @@
 {
-  "name": "reading-tracker",
+  "name": "pace-reading-planner",
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",

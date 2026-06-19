@@ -436,8 +436,9 @@ function PlanScreen({ book, onStart, onBack }) {
 
 // ─── TRACKER SCREEN ───────────────────────────────────────────────────────────
 function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
-  const [logPages, setLogPages] = useState("");
-  const [logDate,  setLogDate]  = useState(toInput(TODAY));
+  const [logValue,  setLogValue]  = useState("");
+  const [logDate,   setLogDate]   = useState(toInput(TODAY));
+  const [logMode,   setLogMode]   = useState("pages"); // "pages" | "endpage"
 
   const left   = Math.max(0, book.totalPages - book.pagesRead);
   const pct    = Math.round((book.pagesRead / book.totalPages) * 100);
@@ -445,25 +446,42 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
   const status = getScheduleStatus(book);
   const streak = calcStreak(book);
   const done   = book.pagesRead >= book.totalPages;
-  const todayRead  = book.dailyTotals[tkey()] || 0;
-  const goalMet    = todayRead >= ag;
-  const goalRecalc = ag !== book.basePPD && !done;
-  const spineC     = SPINE_COLORS[colorIdx % SPINE_COLORS.length];
+  const todayRead      = book.dailyTotals[tkey()] || 0;
+  const todayRemaining = Math.max(0, ag - todayRead); // pages still needed today
+  const goalMet        = todayRead >= ag;
+  const goalRecalc     = ag !== book.basePPD && !done;
+  const spineC         = SPINE_COLORS[colorIdx % SPINE_COLORS.length];
 
   const handleLog = () => {
-    const val = parseInt(logPages);
-    if (!val || val < 1) return alert("Enter pages read.");
+    const val = parseInt(logValue);
+    if (!val || val < 1) return alert(logMode === "pages" ? "Enter pages read." : "Enter the page you ended on.");
     if (!logDate)        return alert("Pick a date.");
     if (done)            return alert("You've already reached the final page.");
-    const toLog   = Math.min(val, left);
+
+    let toLog;
+    if (logMode === "endpage") {
+      // "I stopped on page X" — subtract from total already read
+      if (val <= book.pagesRead) return alert(`You're already on page ${book.pagesRead}. Enter a page number higher than that.`);
+      if (val > book.totalPages)  return alert(`This book only has ${book.totalPages} pages.`);
+      toLog = val - book.pagesRead;
+    } else {
+      toLog = Math.min(val, left);
+    }
+
     const updated = {
       ...book,
       pagesRead: book.pagesRead + toLog,
       dailyTotals: { ...book.dailyTotals, [logDate]: (book.dailyTotals[logDate]||0) + toLog },
-      log: [...book.log, { date:logDate, pages:toLog, ts:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) }]
+      log: [...book.log, {
+        date: logDate,
+        pages: toLog,
+        ts: new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+        mode: logMode,
+        endPage: logMode === "endpage" ? val : null,
+      }]
     };
     onUpdate(updated);
-    setLogPages("");
+    setLogValue("");
   };
 
   const handleDelete = i => {
@@ -501,16 +519,38 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {/* Today's goal hero */}
         {!done && (
-          <Card style={{ background:C.teal, border:"none", textAlign:"center", padding:"24px 20px" }}>
-            <div style={{ fontFamily:T.body, fontSize:12, color:"rgba(255,255,255,.65)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:8 }}>
-              Read today's pages
-            </div>
-            <div style={{ fontFamily:T.body, fontSize:64, fontWeight:600, color:"#fff", lineHeight:1 }}>{ag}</div>
-            <div style={{ fontFamily:T.heading, fontSize:18, color:"rgba(255,255,255,.75)", fontStyle:"italic", marginTop:4, marginBottom:16 }}>pages today</div>
-            {book.pagesRead > 0 && (
-              <div style={{ fontFamily:T.body, fontSize:13, color:"rgba(255,255,255,.7)" }}>
-                p.{book.pagesRead} → p.{Math.min(book.totalPages, book.pagesRead + ag)}
-              </div>
+          <Card style={{ background: goalMet ? C.sageBg : C.teal, border: goalMet ? `1px solid ${C.sage}` : "none", textAlign:"center", padding:"24px 20px" }}>
+            {goalMet ? (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:12, color:C.sage, textTransform:"uppercase", letterSpacing:".08em", marginBottom:10 }}>Today's reading done</div>
+                <div style={{ fontFamily:T.body, fontSize:48, fontWeight:600, color:C.teal, lineHeight:1 }}>{todayRead}</div>
+                <div style={{ fontFamily:T.heading, fontSize:18, color:C.secondary, fontStyle:"italic", marginTop:4 }}>pages read today</div>
+                <div style={{ fontFamily:T.body, fontSize:13, color:C.sage, marginTop:10 }}>
+                  {todayRead > ag ? `${todayRead - ag} extra pages — tomorrow's goal is lighter.` : "Today's goal met."}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:12, color:"rgba(255,255,255,.65)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:8 }}>
+                  {todayRead > 0 ? "Still to read today" : "Read today's pages"}
+                </div>
+                <div style={{ fontFamily:T.body, fontSize:64, fontWeight:600, color:"#fff", lineHeight:1 }}>
+                  {todayRead > 0 ? todayRemaining : ag}
+                </div>
+                <div style={{ fontFamily:T.heading, fontSize:18, color:"rgba(255,255,255,.75)", fontStyle:"italic", marginTop:4, marginBottom: todayRead > 0 ? 6 : 16 }}>
+                  pages {todayRead > 0 ? "to go" : "today"}
+                </div>
+                {todayRead > 0 && (
+                  <div style={{ fontFamily:T.body, fontSize:13, color:"rgba(255,255,255,.6)", marginBottom:10 }}>
+                    {todayRead} of {ag} read · up to p.{Math.min(book.totalPages, book.pagesRead)}
+                  </div>
+                )}
+                {todayRead === 0 && book.pagesRead > 0 && (
+                  <div style={{ fontFamily:T.body, fontSize:13, color:"rgba(255,255,255,.7)" }}>
+                    p.{book.pagesRead} → p.{Math.min(book.totalPages, book.pagesRead + ag)}
+                  </div>
+                )}
+              </>
             )}
           </Card>
         )}
@@ -581,29 +621,52 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {/* Log reading */}
         <Divider />
-        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:14 }}>Log reading</div>
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:12 }}>Log reading</div>
+
+        {/* Mode toggle */}
+        <div style={{ display:"flex", background:C.border, borderRadius:12, padding:3, marginBottom:14 }}>
+          {[["pages","Pages read"],["endpage","Ended on page"]].map(([mode, label]) => (
+            <button key={mode} onClick={() => { setLogMode(mode); setLogValue(""); }} style={{
+              flex:1, padding:"9px 0", fontSize:13, fontWeight:500, fontFamily:T.body,
+              border:"none", borderRadius:10, cursor:"pointer", transition:"all .15s",
+              background: logMode === mode ? C.surface : "transparent",
+              color:       logMode === mode ? C.teal    : C.secondary,
+              boxShadow:   logMode === mode ? C.shadow  : "none",
+            }}>{label}</button>
+          ))}
+        </div>
+
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:10, alignItems:"end" }}>
           <div>
             <Label>Date</Label>
             <PaceInput type="date" value={logDate} onChange={e=>setLogDate(e.target.value)} max={book.dueDate} style={{ marginBottom:0 }} />
           </div>
           <div>
-            <Label>Pages read</Label>
-            <PaceInput type="number" value={logPages} onChange={e=>setLogPages(e.target.value)} placeholder="e.g. 30" min="1" style={{ marginBottom:0 }} />
+            <Label>{logMode === "pages" ? "Pages read" : "Page number"}</Label>
+            <PaceInput
+              type="number" value={logValue} onChange={e=>setLogValue(e.target.value)} min="1"
+              placeholder={logMode === "pages" ? "e.g. 30" : `e.g. ${book.pagesRead + ag}`}
+              style={{ marginBottom:0 }}
+            />
           </div>
           <button onClick={handleLog} style={{
             padding:"13px 18px", background:C.teal, border:"none", borderRadius:14,
             color:"#fff", fontSize:20, cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
-            marginBottom:0
           }}>＋</button>
         </div>
+
+        {logMode === "endpage" && book.pagesRead > 0 && (
+          <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:6, padding:"6px 0" }}>
+            You're currently on page <strong style={{ color:C.teal }}>{book.pagesRead}</strong>. Enter the page you stopped on.
+          </div>
+        )}
 
         {/* Today's status */}
         {todayRead > 0 && !done && (
           <div style={{ fontFamily:T.body, fontSize:13, marginTop:10, padding:"10px 14px", borderRadius:12, background: goalMet ? C.sageBg : C.terraBg, border:`1px solid ${goalMet ? C.sage : C.terra}`, color: goalMet ? C.sage : C.terra }}>
             {goalMet
-              ? `Today's goal met — ${todayRead} pages read.`
-              : `${todayRead} of ${ag} pages today.`}
+              ? `Today's goal met — ${todayRead} pages read today.`
+              : `${todayRead} of ${ag} pages today — ${todayRemaining} to go.`}
           </div>
         )}
 
@@ -620,7 +683,9 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
                 <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}` }}>
                   <div>
                     <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal }}>{lbl}</div>
-                    <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, marginTop:2 }}>{e.ts}</div>
+                    <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, marginTop:2 }}>
+                      {e.ts}{e.endPage ? ` · ended on p.${e.endPage}` : ""}
+                    </div>
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ fontFamily:T.body, fontSize:16, fontWeight:600, color:C.teal }}>+{e.pages} pages</span>

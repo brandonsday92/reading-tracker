@@ -30,15 +30,16 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const SPINE_COLORS = [C.teal, "#4A7C6F", C.gold, "#7A6B4A", "#6F9D74", "#8B6B5D"];
 
-function dkey(d) { return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
+// Zero-padded YYYY-MM-DD so log entries, dailyTotals, and readingDays always match
+function dkey(d) {
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
 function tkey() { return dkey(TODAY); }
 function parseDate(s) {
   const [y,m,d] = s.split("-").map(Number);
   const dt = new Date(y, m-1, d); dt.setHours(0,0,0,0); return dt;
 }
-function toInput(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
+function toInput(d) { return dkey(d); }
 function fmtShort(d) { return `${MONTHS[d.getMonth()].slice(0,3)} ${d.getDate()}`; }
 function fmtFull(d)  { return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; }
 
@@ -318,27 +319,38 @@ function BookCard({ book, onClick, colorIdx }) {
 
 // ─── ADD BOOK SCREEN ──────────────────────────────────────────────────────────
 function AddBook({ onSave, onBack }) {
-  const [title,      setTitle]      = useState("");
-  const [pages,      setPages]      = useState("");
-  const [dueDate,    setDueDate]    = useState(null);
-  const [dueCal,     setDueCal]     = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
-  const [readCal,    setReadCal]    = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
-  const [preset,     setPreset]     = useState(null);
-  const [customDays, setCustomDays] = useState(new Set());
+  const [title,        setTitle]        = useState("");
+  const [pages,        setPages]        = useState("");
+  const [alreadyRead,  setAlreadyRead]  = useState("");
+  const [dueDate,      setDueDate]      = useState(null);
+  const [dueCal,       setDueCal]       = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
+  const [readCal,      setReadCal]      = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
+  const [preset,       setPreset]       = useState(null);
+  const [customDays,   setCustomDays]   = useState(new Set());
 
   const shiftDue  = d => setDueCal(c  => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
   const shiftRead = d => setReadCal(c => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
   const toggleDay = t => setCustomDays(p => { const s=new Set(p); s.has(t)?s.delete(t):s.add(t); return s; });
 
   const handleSave = () => {
-    const p = parseInt(pages);
-    if (!p || p < 1)                          return alert("Please enter the total number of pages.");
+    const p  = parseInt(pages);
+    const ar = parseInt(alreadyRead) || 0;
+    if (!p || p < 1)                           return alert("Please enter the total number of pages.");
+    if (ar < 0 || ar >= p)                     return alert("Pages already read must be less than the total.");
     if (!dueDate)                              return alert("Please choose a finish date.");
-    if (!preset)                              return alert("Please choose your reading days.");
-    if (preset==="custom" && !customDays.size) return alert("Please select at least one day.");
+    if (!preset)                               return alert("Please choose your reading days.");
+    if (preset==="custom" && !customDays.size)  return alert("Please select at least one day.");
+    const remaining = p - ar;
     const rdays = buildReadingDays(preset, customDays, TODAY, dueDate);
     if (!rdays.length) return alert("No reading days found — try adjusting your schedule.");
-    onSave({ title: title.trim()||"Untitled", totalPages:p, dueDate:dkey(dueDate), readingDays:rdays, basePPD:Math.ceil(p/rdays.length) });
+    onSave({
+      title: title.trim()||"Untitled",
+      totalPages: p,
+      startingPage: ar,
+      dueDate: dkey(dueDate),
+      readingDays: rdays,
+      basePPD: Math.ceil(remaining / rdays.length),
+    });
   };
 
   const presets = [
@@ -361,6 +373,9 @@ function AddBook({ onSave, onBack }) {
 
         <Label>Total pages</Label>
         <PaceInput type="number" value={pages} onChange={e=>setPages(e.target.value)} placeholder="e.g. 258" min="1" />
+
+        <Label>Pages already read <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.border}}>(optional — leave blank if starting fresh)</span></Label>
+        <PaceInput type="number" value={alreadyRead} onChange={e=>setAlreadyRead(e.target.value)} placeholder="e.g. 0" min="0" />
 
         <Label>Finish by</Label>
         <MiniCalendar calState={dueCal} onShift={shiftDue}
@@ -418,9 +433,15 @@ function PlanScreen({ book, onStart, onBack }) {
 
         <Card style={{ width:"100%", textAlign:"center", background:C.goldLight, border:`1px solid ${C.gold}` }}>
           <div style={{ fontFamily:T.body, fontSize:13, color:C.charcoal, lineHeight:1.7 }}>
+            {book.startingPage > 0 && <><strong>{book.totalPages - book.startingPage}</strong> pages remaining · </>}
             <strong>{book.readingDays.length}</strong> reading days ·
             finish by <strong>{fmtShort(parseDate(book.dueDate))}</strong>
           </div>
+          {book.startingPage > 0 && (
+            <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:6 }}>
+              Starting from p.{book.startingPage} of {book.totalPages}
+            </div>
+          )}
           <div style={{ fontFamily:T.heading, fontSize:15, color:C.secondary, marginTop:6, fontStyle:"italic" }}>
             One page at a time.
           </div>
@@ -523,11 +544,16 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
             {goalMet ? (
               <>
                 <div style={{ fontFamily:T.body, fontSize:12, color:C.sage, textTransform:"uppercase", letterSpacing:".08em", marginBottom:10 }}>Today's reading done</div>
-                <div style={{ fontFamily:T.body, fontSize:48, fontWeight:600, color:C.teal, lineHeight:1 }}>{todayRead}</div>
-                <div style={{ fontFamily:T.heading, fontSize:18, color:C.secondary, fontStyle:"italic", marginTop:4 }}>pages read today</div>
-                <div style={{ fontFamily:T.body, fontSize:13, color:C.sage, marginTop:10 }}>
-                  {todayRead > ag ? `${todayRead - ag} extra pages — tomorrow's goal is lighter.` : "Today's goal met."}
-                </div>
+                <div style={{ fontFamily:T.body, fontSize:48, fontWeight:600, color:C.teal, lineHeight:1 }}>0</div>
+                <div style={{ fontFamily:T.heading, fontSize:18, color:C.secondary, fontStyle:"italic", marginTop:4 }}>pages left today</div>
+                {todayRead > ag
+                  ? <div style={{ fontFamily:T.body, fontSize:13, color:C.sage, marginTop:10 }}>
+                      {todayRead - ag} pages ahead — tomorrow's goal is a little lighter.
+                    </div>
+                  : <div style={{ fontFamily:T.body, fontSize:13, color:C.sage, marginTop:10 }}>
+                      Exactly on pace. Nice work.
+                    </div>
+                }
               </>
             ) : (
               <>
@@ -712,7 +738,7 @@ export default function App() {
   const colorIdx = books.findIndex(b => b.id === curId);
 
   const handleSaveBook = data => {
-    const book = { ...data, id:"b"+Date.now(), pagesRead:0, log:[], dailyTotals:{} };
+    const book = { ...data, id:"b"+Date.now(), pagesRead:data.startingPage||0, log:[], dailyTotals:{} };
     setPendingBook(book);
     setScreen("plan");
   };

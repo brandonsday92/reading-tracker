@@ -67,10 +67,10 @@ function getAdaptiveGoal(book) {
 
 function getScheduleStatus(book) {
   const ag = getAdaptiveGoal(book);
-  if (ag === 0) return { label: "Final page reached", dot: "✓", color: C.sage };
-  if (ag < book.basePPD)  return { label: "Ahead of schedule", dot: "●", color: C.sage };
-  if (ag === book.basePPD) return { label: "On schedule", dot: "●", color: C.gold };
-  return { label: `${Math.round((ag - book.basePPD) / book.basePPD)} day${ag - book.basePPD > book.basePPD ? "s" : ""} behind`, dot: "●", color: C.terra };
+  if (ag === 0)            return { label: "Final page reached",  icon: "ahead",    color: C.sage  };
+  if (ag < book.basePPD)  return { label: "Ahead of schedule",   icon: "ahead",    color: C.sage  };
+  if (ag === book.basePPD) return { label: "On schedule",         icon: "ontrack",  color: C.teal  };
+  return { label: "A little behind",                               icon: "behind",   color: C.terra };
 }
 
 function calcStreak(book) {
@@ -93,27 +93,110 @@ function saveBooks(b) { try { localStorage.setItem(STORE, JSON.stringify(b)); } 
 
 // ─── SHARED UI COMPONENTS ─────────────────────────────────────────────────────
 
-function PaceLogo({ size = 28 }) {
-  // Bookmark icon — the Pace visual identity
+// ─── SVG ICON COMPONENTS ─────────────────────────────────────────────────────
+
+function IconLogo({ size = 32 }) {
+  const s = size, h = Math.round(size * 1.2);
   return (
-    <svg width={size} height={size * 1.2} viewBox="0 0 28 34" fill="none">
-      <path d="M4 2h20a2 2 0 0 1 2 2v28l-12-7L2 32V4a2 2 0 0 1 2-2z" fill={C.teal} />
-      <path d="M4 2h20a2 2 0 0 1 2 2v28l-12-7L2 32V18h24" stroke="none" fill={C.tealLight} opacity="0.3" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width={s} height={h}>
+      <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke="#2C5F5D" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round"/>
+      <path d="M23 70 L50 60 L77 70 V106 L50 88 L23 106 Z" fill="#2C5F5D"/>
     </svg>
   );
 }
 
 function BookmarkProgress({ pct, size = 32 }) {
+  // Uses logo.svg geometry, fills from bottom up based on pct
   const fill = Math.max(0, Math.min(1, pct / 100));
-  const totalH = size * 1.2;
-  const fillH  = totalH * fill;
+  const totalH = Math.round(size * 1.2);
+  // Fill starts at bottom: clip rect from y=(1-fill)*120 to 120
+  const clipY = 120 * (1 - fill);
+  const uid = `bp${size}`;
   return (
-    <svg width={size} height={totalH} viewBox="0 0 32 38" fill="none">
-      <path d="M4 2h24a2 2 0 0 1 2 2v34l-16-9L0 38V4a2 2 0 0 1 2-2z" fill={C.border} />
-      <clipPath id={`bp-${size}`}>
-        <rect x="0" y={38 - 38 * fill} width="32" height={38 * fill} />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width={size} height={totalH}>
+      <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke={C.border} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round"/>
+      <clipPath id={uid}>
+        <rect x="0" y={clipY} width="100" height={120 - clipY} />
       </clipPath>
-      <path d="M4 2h24a2 2 0 0 1 2 2v34l-16-9L0 38V4a2 2 0 0 1 2-2z" fill={C.teal} clipPath={`url(#bp-${size})`} />
+      <path d="M23 70 L50 60 L77 70 V106 L50 88 L23 106 Z" fill={C.teal} clipPath={`url(#${uid})`} opacity={fill > 0 ? 1 : 0}/>
+      <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke={C.teal} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" opacity={fill > 0 ? 1 : 0} clipPath={`url(#${uid})`}/>
+    </svg>
+  );
+}
+
+function IconHome({ size = 24, color = C.charcoal, active = false }) {
+  const c = active ? C.teal : color;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>
+      <path d="M9 21v-6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6"/>
+      <path d="M12 1v1M18 2.5l-.7.7M6 2.5l.7.7" stroke={active ? C.gold : C.gold} strokeWidth="1.5"/>
+    </svg>
+  );
+}
+
+function IconShelf({ size = 24, color = C.charcoal, active = false }) {
+  const c = active ? C.teal : color;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 4h4v16H4zM9 4h4v16H9z"/>
+      <path d="M14 4.5l3.5 15.5M17.5 4l1.5 6" opacity="0.4"/>
+    </svg>
+  );
+}
+
+function IconHistory({ size = 24, color = C.charcoal, active = false }) {
+  const c = active ? C.teal : color;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8v4l3 3"/>
+      <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/>
+    </svg>
+  );
+}
+
+function IconLogReading({ size = 24, color = C.teal }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 6s3-1 10-1 10 1 10 1v11s-3-1-10-1-10 1-10 1z"/>
+      <path d="M12 5v11"/>
+      <path d="M3 19c2 2 5 2 7 0l8-4a1.5 1.5 0 0 0-1-3h-4"/>
+    </svg>
+  );
+}
+
+function IconAdd({ size = 24, color = C.charcoal }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  );
+}
+
+function IconStatusAhead({ size = 20 }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={C.sage} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3h14v18l-7-4-7 4V3z"/>
+      <path d="M12 14V8M9 11l3-3 3 3"/>
+    </svg>
+  );
+}
+
+function IconStatusOnTrack({ size = 20 }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={C.teal} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3h14v18l-7-4-7 4V3z"/>
+      <path d="M9 10l2 2 4-4"/>
+    </svg>
+  );
+}
+
+function IconStatusBehind({ size = 20 }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={C.terra} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3h14v18l-7-4-7 4V3z"/>
+      <path d="M9 11h6"/>
     </svg>
   );
 }
@@ -122,8 +205,10 @@ function TopBar({ title, onBack, rightAction }) {
   return (
     <div style={{ display:"flex", alignItems:"center", padding:"18px 20px 0", gap:12 }}>
       {onBack && (
-        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:"6px 8px 6px 0", color:C.secondary, fontSize:20, lineHeight:1 }}>
-          ←
+        <button onClick={onBack} style={{ background:"none", border:"none", cursor:"pointer", padding:"6px 8px 6px 0", color:C.secondary, lineHeight:1, display:"flex", alignItems:"center" }}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
         </button>
       )}
       <span style={{ flex:1, fontFamily:T.heading, fontSize:22, fontWeight:500, color:C.charcoal }}>{title}</span>
@@ -232,19 +317,20 @@ function Shelf({ books, onOpen, onAdd }) {
       {/* Header */}
       <div style={{ padding:"24px 20px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <PaceLogo size={28} />
+          <IconLogo size={28} />
           <span style={{ fontFamily:T.heading, fontSize:28, fontWeight:500, color:C.charcoal, letterSpacing:"-.01em" }}>Pace</span>
         </div>
         <button onClick={onAdd} style={{
+          display:"flex", alignItems:"center", gap:7,
           background:C.teal, color:"#fff", border:"none", borderRadius:20,
           padding:"9px 18px", fontSize:13, fontWeight:600, fontFamily:T.body, cursor:"pointer", boxShadow:C.shadow
-        }}>+ Add book</button>
+        }}><IconAdd size={16} color="#fff" /> Add book</button>
       </div>
 
       <div style={{ padding:"20px 20px 80px" }}>
         {books.length === 0 ? (
           <div style={{ textAlign:"center", padding:"4rem 1rem" }}>
-            <BookmarkProgress pct={0} size={48} />
+            <IconLogo size={48} />
             <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginTop:20, marginBottom:8 }}>
               Your next story is waiting.
             </div>
@@ -257,13 +343,16 @@ function Shelf({ books, onOpen, onAdd }) {
           <>
             {todayBooks.length > 0 && (
               <>
-                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", marginBottom:12 }}>Today's reading</div>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", marginBottom:12, display:"flex", alignItems:"center", gap:7 }}>
+                  <IconHome size={14} color={C.secondary} /> Today's reading
+                </div>
                 {todayBooks.map((b, i) => <BookCard key={b.id} book={b} onClick={() => onOpen(b.id)} colorIdx={books.indexOf(b)} />)}
               </>
             )}
             {otherBooks.length > 0 && (
               <>
-                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", margin:"20px 0 12px" }}>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".08em", margin:"20px 0 12px", display:"flex", alignItems:"center", gap:7 }}>
+                  <IconShelf size={14} color={C.secondary} />
                   {todayBooks.length > 0 ? "Other books" : "Your books"}
                 </div>
                 {otherBooks.map(b => <BookCard key={b.id} book={b} onClick={() => onOpen(b.id)} colorIdx={books.indexOf(b)} />)}
@@ -292,7 +381,7 @@ function BookCard({ book, onClick, colorIdx }) {
         <div style={{ flex:1, padding:"16px 18px" }}>
           <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:6 }}>
             <div style={{ fontFamily:T.heading, fontSize:19, color:C.charcoal, fontWeight:500, flex:1, marginRight:12, lineHeight:1.2 }}>{book.title}</div>
-            <BookmarkProgress pct={pct} size={22} />
+            <BookmarkProgress pct={pct} size={24} />
           </div>
           {!done && (
             <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
@@ -302,7 +391,10 @@ function BookCard({ book, onClick, colorIdx }) {
           )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <span style={{ fontFamily:T.body, fontSize:12, color:status.color, display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontSize:8 }}>{status.dot}</span>{done ? "Final page reached" : status.label}
+              {done || status.icon === "ahead"   ? <IconStatusAhead size={16} />   : null}
+              {status.icon === "ontrack"         ? <IconStatusOnTrack size={16} /> : null}
+              {status.icon === "behind"          ? <IconStatusBehind size={16} />  : null}
+              {done ? "Final page reached" : status.label}
             </span>
             <span style={{ fontFamily:T.body, fontSize:12, color:C.secondary }}>Due {fmtShort(due)}</span>
           </div>
@@ -422,7 +514,7 @@ function PlanScreen({ book, onStart, onBack }) {
     <div style={{ minHeight:"100vh", background:C.paper, display:"flex", flexDirection:"column" }}>
       <TopBar title="" onBack={onBack} />
       <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"0 28px" }}>
-        <BookmarkProgress pct={0} size={56} />
+        <IconLogo size={48} />
         <div style={{ fontFamily:T.heading, fontSize:17, color:C.secondary, marginTop:24, marginBottom:8, letterSpacing:".02em" }}>
           Your daily reading goal
         </div>
@@ -449,7 +541,7 @@ function PlanScreen({ book, onStart, onBack }) {
       </div>
       <div style={{ padding:"0 20px 40px" }}>
         <BtnPrimary onClick={onStart}>Begin tracking</BtnPrimary>
-        <BtnSecondary onClick={onBack} style={{ marginTop:10 }}>← Adjust plan</BtnSecondary>
+        <BtnSecondary onClick={onBack} style={{ marginTop:10 }}>Adjust plan</BtnSecondary>
       </div>
     </div>
   );
@@ -529,7 +621,11 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
         title={book.title}
         onBack={onBack}
         rightAction={
-          <button onClick={onDelete} style={{ background:"none", border:"none", cursor:"pointer", color:C.border, fontSize:18, padding:6 }}>🗑</button>
+          <button onClick={onDelete} style={{ background:"none", border:"none", cursor:"pointer", color:C.border, padding:6, display:"flex", alignItems:"center" }}>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke={C.border} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
         }
       />
 
@@ -583,7 +679,7 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {done && (
           <Card style={{ background:C.sageBg, border:`1px solid ${C.sage}`, textAlign:"center", padding:"28px 20px" }}>
-            <BookmarkProgress pct={100} size={44} />
+            <IconLogo size={40} />
             <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginTop:16, marginBottom:6 }}>You reached the final page.</div>
             <div style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>{book.title}</div>
           </Card>
@@ -593,8 +689,11 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
         <div style={{ display:"flex", gap:10, marginTop:12 }}>
           <div style={{ flex:1, background:C.surface, border:`1px solid ${C.border}`, borderRadius:14, padding:"12px 14px", boxShadow:C.shadow }}>
             <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Schedule</div>
-            <div style={{ fontFamily:T.body, fontSize:13, color:status.color, display:"flex", alignItems:"center", gap:5, fontWeight:500 }}>
-              <span style={{ fontSize:8 }}>●</span> {status.label}
+            <div style={{ fontFamily:T.body, fontSize:13, color:status.color, display:"flex", alignItems:"center", gap:6, fontWeight:500 }}>
+              {status.icon === "ahead"   && <IconStatusAhead size={16} />}
+              {status.icon === "ontrack" && <IconStatusOnTrack size={16} />}
+              {status.icon === "behind"  && <IconStatusBehind size={16} />}
+              {status.label}
             </div>
           </div>
           {streak > 0 && (
@@ -632,7 +731,9 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {/* 7-day dots */}
         <Divider />
-        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10 }}>Days of steady reading</div>
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10, display:"flex", alignItems:"center", gap:7 }}>
+          <IconHistory size={16} color={C.secondary} /> Days of steady reading
+        </div>
         <div style={{ display:"flex", gap:6, marginBottom:4 }}>
           {dots.map((dot,i) => (
             <div key={i} style={{
@@ -676,9 +777,10 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
             />
           </div>
           <button onClick={handleLog} style={{
-            padding:"13px 18px", background:C.teal, border:"none", borderRadius:14,
-            color:"#fff", fontSize:20, cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
-          }}>＋</button>
+            padding:"13px 16px", background:C.teal, border:"none", borderRadius:14,
+            color:"#fff", cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
+            display:"flex", alignItems:"center", justifyContent:"center"
+          }}><IconLogReading size={22} color="#fff" /></button>
         </div>
 
         {logMode === "endpage" && book.pagesRead > 0 && (
@@ -698,7 +800,9 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {/* Log history */}
         <Divider />
-        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10 }}>Reading history</div>
+        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:10, display:"flex", alignItems:"center", gap:7 }}>
+          <IconHistory size={16} color={C.secondary} /> Reading history
+        </div>
         {book.log.length === 0
           ? <div style={{ fontFamily:T.heading, fontSize:16, color:C.secondary, fontStyle:"italic", padding:"8px 0" }}>No entries yet — log your first pages above.</div>
           : book.log.slice().reverse().map((e,ri) => {

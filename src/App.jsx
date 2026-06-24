@@ -58,11 +58,15 @@ function buildReadingDays(preset, customSet, startDate, dueDate) {
 }
 
 function getAdaptiveGoal(book) {
-  const left = Math.max(0, book.totalPages - book.pagesRead);
-  if (left === 0) return 0;
-  const future  = book.readingDays.filter(d => parseDate(d) > TODAY).length;
-  const isToday = book.readingDays.includes(tkey());
-  return Math.ceil(left / Math.max(1, future + (isToday ? 1 : 0)));
+  // Use pages remaining BEFORE today's logging so today's goal stays
+  // fixed as you log — only recalculates tomorrow onward.
+  const todayLogged = book.dailyTotals[tkey()] || 0;
+  const leftBeforeToday = Math.max(0, book.totalPages - book.pagesRead + todayLogged);
+  if (leftBeforeToday === 0) return 0;
+  const futureDays = book.readingDays.filter(d => parseDate(d) > TODAY).length;
+  const isToday    = book.readingDays.includes(tkey());
+  const totalDays  = Math.max(1, futureDays + (isToday ? 1 : 0));
+  return Math.ceil(leftBeforeToday / totalDays);
 }
 
 function getScheduleStatus(book) {

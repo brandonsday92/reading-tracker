@@ -408,13 +408,17 @@ function BookCard({ book, onClick, colorIdx }) {
   return (
     <Card onClick={onClick} style={{ padding:0, overflow:"hidden" }}>
       <div style={{ display:"flex" }}>
-        {/* Color spine */}
-        <div style={{ width:5, background:spineC, flexShrink:0 }} />
+        {/* Color spine or cover thumbnail */}
+        {book.coverUrl
+          ? <img src={book.coverUrl} alt="" style={{ width:52, objectFit:"cover", flexShrink:0 }} />
+          : <div style={{ width:5, background:spineC, flexShrink:0 }} />
+        }
         <div style={{ flex:1, padding:"16px 18px" }}>
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:6 }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:2 }}>
             <div style={{ fontFamily:T.heading, fontSize:19, color:C.charcoal, fontWeight:500, flex:1, marginRight:12, lineHeight:1.2 }}>{book.title}</div>
             <BookmarkProgress pct={pct} size={24} />
           </div>
+          {book.author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginBottom:6 }}>{book.author}</div>}
           {!done && (
             <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
               <span style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal, lineHeight:1 }}>{ag}</span>
@@ -445,16 +449,70 @@ function BookCard({ book, onClick, colorIdx }) {
 function AddBook({ onSave, onBack }) {
   const [title,        setTitle]        = useState("");
   const [pages,        setPages]        = useState("");
+  const [author,       setAuthor]       = useState("");
+  const [coverUrl,     setCoverUrl]     = useState(null);
   const [alreadyRead,  setAlreadyRead]  = useState("");
   const [dueDate,      setDueDate]      = useState(null);
   const [dueCal,       setDueCal]       = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
   const [readCal,      setReadCal]      = useState({ y:TODAY.getFullYear(), m:TODAY.getMonth() });
   const [preset,       setPreset]       = useState(null);
   const [customDays,   setCustomDays]   = useState(new Set());
+  const [query,        setQuery]        = useState("");
+  const [results,      setResults]      = useState([]);
+  const [searching,    setSearching]    = useState(false);
+  const [showResults,  setShowResults]  = useState(false);
+  const [searchTimer,  setSearchTimer]  = useState(null);
 
   const shiftDue  = d => setDueCal(c  => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
   const shiftRead = d => setReadCal(c => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
   const toggleDay = t => setCustomDays(p => { const s=new Set(p); s.has(t)?s.delete(t):s.add(t); return s; });
+
+  const handleQueryChange = (val) => {
+    setQuery(val);
+    setTitle(val);
+    setCoverUrl(null);
+    setAuthor("");
+    if (searchTimer) clearTimeout(searchTimer);
+    if (val.trim().length < 2) { setResults([]); setShowResults(false); return; }
+    const timer = setTimeout(() => searchBooks(val), 500);
+    setSearchTimer(timer);
+  };
+
+  const searchBooks = async (q) => {
+    setSearching(true);
+    setShowResults(true);
+    try {
+      const url = `https://openlibrary.org/search.json?title=${encodeURIComponent(q)}&fields=title,author_name,number_of_pages_median,cover_i,key&limit=6`;
+      const res  = await fetch(url);
+      const data = await res.json();
+      const filtered = (data.docs || [])
+        .filter(b => b.number_of_pages_median && b.number_of_pages_median > 10)
+        .slice(0, 6);
+      setResults(filtered);
+    } catch {
+      setResults([]);
+    }
+    setSearching(false);
+  };
+
+  const selectBook = (book) => {
+    const t = book.title || "";
+    const a = (book.author_name || [])[0] || "";
+    const p = book.number_of_pages_median || "";
+    const cover = book.cover_i ? `https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg` : null;
+    setQuery(t);
+    setTitle(t);
+    setAuthor(a);
+    setPages(String(p));
+    setCoverUrl(cover);
+    setShowResults(false);
+    setResults([]);
+  };
+
+  const clearBook = () => {
+    setQuery(""); setTitle(""); setAuthor(""); setPages(""); setCoverUrl(null);
+    setResults([]); setShowResults(false);
+  };
 
   const handleSave = () => {
     const p  = parseInt(pages);
@@ -469,6 +527,8 @@ function AddBook({ onSave, onBack }) {
     if (!rdays.length) return alert("No reading days found — try adjusting your schedule.");
     onSave({
       title: title.trim()||"Untitled",
+      author,
+      coverUrl,
       totalPages: p,
       startingPage: ar,
       dueDate: dkey(dueDate),
@@ -492,7 +552,83 @@ function AddBook({ onSave, onBack }) {
           Tell us about your book and we'll handle the math.
         </p>
 
-        <Label>Book title</Label>
+        {/* ── Book search ── */}
+        <Label>Search for your book</Label>
+        <div style={{ position:"relative", marginBottom: showResults ? 0 : 4 }}>
+          <PaceInput
+            type="text" value={query}
+            onChange={e => handleQueryChange(e.target.value)}
+            placeholder="Type a title to search..."
+            style={{ marginBottom: 0, paddingRight: query ? 40 : 15 }}
+          />
+          {query.length > 0 && (
+            <button onClick={clearBook} style={{
+              position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
+              background:"none", border:"none", cursor:"pointer", color:C.secondary,
+              fontSize:18, lineHeight:1, padding:2
+            }}>×</button>
+          )}
+        </div>
+
+        {/* Search results dropdown */}
+        {showResults && (
+          <div style={{
+            background:C.surface, border:`1px solid ${C.border}`, borderRadius:14,
+            boxShadow:C.shadowMd, marginBottom:16, overflow:"hidden"
+          }}>
+            {searching ? (
+              <div style={{ padding:"16px 18px", fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
+                Searching...
+              </div>
+            ) : results.length === 0 ? (
+              <div style={{ padding:"16px 18px", fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
+                No matches found — you can still fill in details manually below.
+              </div>
+            ) : results.map((b, i) => {
+              const cover = b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null;
+              const auth  = (b.author_name || [])[0] || "";
+              return (
+                <div key={i} onClick={() => selectBook(b)} style={{
+                  display:"flex", alignItems:"center", gap:12, padding:"12px 16px",
+                  borderBottom: i < results.length-1 ? `1px solid ${C.border}` : "none",
+                  cursor:"pointer", background:"transparent", transition:"background .1s"
+                }}
+                  onMouseEnter={e => e.currentTarget.style.background = C.paper}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  {cover
+                    ? <img src={cover} alt="" style={{ width:36, height:52, objectFit:"cover", borderRadius:4, flexShrink:0, border:`1px solid ${C.border}` }} />
+                    : <div style={{ width:36, height:52, borderRadius:4, background:C.border, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        <IconLogo size={18} />
+                      </div>
+                  }
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.title}</div>
+                    {auth && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:2 }}>{auth}</div>}
+                    {b.number_of_pages_median && (
+                      <div style={{ fontFamily:T.body, fontSize:11, color:C.teal, marginTop:2 }}>{b.number_of_pages_median} pages</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Selected book card */}
+        {coverUrl && !showResults && (
+          <div style={{ display:"flex", alignItems:"center", gap:14, background:C.goldLight, border:`1px solid ${C.gold}`, borderRadius:14, padding:"12px 14px", marginBottom:16 }}>
+            <img src={coverUrl} alt="" style={{ width:40, height:58, objectFit:"cover", borderRadius:6, border:`1px solid ${C.gold}` }} />
+            <div>
+              <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal }}>{title}</div>
+              {author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:2 }}>{author}</div>}
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.teal, marginTop:2 }}>{pages} pages · from Open Library</div>
+            </div>
+          </div>
+        )}
+
+        {/* Manual fallback fields — always shown so user can edit or enter manually */}
+        <Label>Book title <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.secondary}}>(edit if needed)</span></Label>
         <PaceInput type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. The Remains of the Day" />
 
         <Label>Total pages</Label>
@@ -662,9 +798,14 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
       />
 
       <div style={{ padding:"16px 20px 80px" }}>
-        <p style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom:20 }}>
+        <p style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom: book.author ? 2 : 20 }}>
           {book.totalPages} pages · Due {fmtShort(parseDate(book.dueDate))}
         </p>
+        {book.author && (
+          <p style={{ fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic", marginBottom:20 }}>
+            by {book.author}
+          </p>
+        )}
 
         {/* Today's goal hero */}
         {!done && (

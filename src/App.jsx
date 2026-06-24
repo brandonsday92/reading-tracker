@@ -92,7 +92,35 @@ function calcStreak(book) {
 
 // ─── LOCAL STORAGE ────────────────────────────────────────────────────────────
 const STORE = "pace_books_v1";
-function loadBooks() { try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch { return []; } }
+
+// Normalize any date string to zero-padded YYYY-MM-DD.
+// Handles old format "2026-6-3" -> "2026-06-03" so books saved before the
+// padding fix still work correctly.
+function normDate(s) {
+  if (!s) return s;
+  const [y, m, d] = s.split("-").map(Number);
+  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+}
+
+function migrateBook(b) {
+  return {
+    ...b,
+    dueDate:     normDate(b.dueDate),
+    readingDays: (b.readingDays || []).map(normDate),
+    // Also normalize keys in dailyTotals
+    dailyTotals: Object.fromEntries(
+      Object.entries(b.dailyTotals || {}).map(([k, v]) => [normDate(k), v])
+    ),
+    log: (b.log || []).map(e => ({ ...e, date: normDate(e.date) })),
+  };
+}
+
+function loadBooks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORE)) || [];
+    return raw.map(migrateBook);
+  } catch { return []; }
+}
 function saveBooks(b) { try { localStorage.setItem(STORE, JSON.stringify(b)); } catch {} }
 
 // ─── SHARED UI COMPONENTS ─────────────────────────────────────────────────────

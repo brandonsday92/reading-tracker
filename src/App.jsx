@@ -137,21 +137,30 @@ function IconLogo({ size = 32 }) {
   );
 }
 
+// Unique ID counter so multiple BookmarkProgress instances never share a clipPath id
+let _bpCounter = 0;
+
 function BookmarkProgress({ pct, size = 32 }) {
-  // Uses logo.svg geometry, fills from bottom up based on pct
-  const fill = Math.max(0, Math.min(1, pct / 100));
+  const [uid] = useState(() => `bp_${++_bpCounter}`);
+  const fill  = Math.max(0, Math.min(1, pct / 100));
   const totalH = Math.round(size * 1.2);
-  // Fill starts at bottom: clip rect from y=(1-fill)*120 to 120
-  const clipY = 120 * (1 - fill);
-  const uid = `bp${size}`;
+  const clipY  = 120 * (1 - fill);
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width={size} height={totalH}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" width={size} height={totalH} style={{ overflow:"visible" }}>
+      <defs>
+        <clipPath id={uid}>
+          <rect x="0" y={clipY} width="100" height={120 - clipY} />
+        </clipPath>
+      </defs>
+      {/* Unfilled outline */}
       <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke={C.border} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round"/>
-      <clipPath id={uid}>
-        <rect x="0" y={clipY} width="100" height={120 - clipY} />
-      </clipPath>
-      <path d="M23 70 L50 60 L77 70 V106 L50 88 L23 106 Z" fill={C.teal} clipPath={`url(#${uid})`} opacity={fill > 0 ? 1 : 0}/>
-      <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke={C.teal} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" opacity={fill > 0 ? 1 : 0} clipPath={`url(#${uid})`}/>
+      {/* Filled teal layer clipped from bottom up */}
+      {fill > 0 && (
+        <>
+          <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill={C.teal} clipPath={`url(#${uid})`} opacity="0.15"/>
+          <path d="M20 10 H80 V110 L50 90 L20 110 Z" fill="none" stroke={C.teal} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" clipPath={`url(#${uid})`}/>
+        </>
+      )}
     </svg>
   );
 }
@@ -800,8 +809,8 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
         title={book.title}
         onBack={onBack}
         rightAction={
-          <button onClick={onDelete} style={{ background:"none", border:"none", cursor:"pointer", color:C.border, padding:6, display:"flex", alignItems:"center" }}>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke={C.border} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <button onClick={onDelete} style={{ background:"none", border:"none", cursor:"pointer", color:C.secondary, padding:6, display:"flex", alignItems:"center" }}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke={C.secondary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
           </svg>
         </button>

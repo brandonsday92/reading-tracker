@@ -408,24 +408,35 @@ function BookCard({ book, onClick, colorIdx }) {
   return (
     <Card onClick={onClick} style={{ padding:0, overflow:"hidden" }}>
       <div style={{ display:"flex" }}>
-        {/* Color spine or cover thumbnail */}
-        {book.coverUrl
-          ? <img src={book.coverUrl} alt="" style={{ width:52, objectFit:"cover", flexShrink:0 }} />
-          : <div style={{ width:5, background:spineC, flexShrink:0 }} />
-        }
-        <div style={{ flex:1, padding:"16px 18px" }}>
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:2 }}>
-            <div style={{ fontFamily:T.heading, fontSize:19, color:C.charcoal, fontWeight:500, flex:1, marginRight:12, lineHeight:1.2 }}>{book.title}</div>
-            <BookmarkProgress pct={pct} size={24} />
-          </div>
-          {book.author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginBottom:6 }}>{book.author}</div>}
-          {!done && (
-            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
-              <span style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal, lineHeight:1 }}>{ag}</span>
-              <span style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>pages today</span>
+        {/* Always show thin color spine */}
+        <div style={{ width:5, background:spineC, flexShrink:0 }} />
+
+        <div style={{ flex:1, padding:"16px 16px 14px 16px" }}>
+          {/* Title row with optional thumbnail */}
+          <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:2 }}>
+            {book.coverUrl && (
+              <img
+                src={book.coverUrl} alt=""
+                style={{ width:44, height:64, objectFit:"cover", borderRadius:6,
+                  border:`1px solid ${C.border}`, flexShrink:0, boxShadow:"0 1px 6px rgba(0,0,0,0.10)" }}
+              />
+            )}
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:2 }}>
+                <div style={{ fontFamily:T.heading, fontSize:19, color:C.charcoal, fontWeight:500, flex:1, marginRight:10, lineHeight:1.2 }}>{book.title}</div>
+                <BookmarkProgress pct={pct} size={22} />
+              </div>
+              {book.author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginBottom:6 }}>{book.author}</div>}
+              {!done && (
+                <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:6 }}>
+                  <span style={{ fontFamily:T.body, fontSize:26, fontWeight:600, color:C.teal, lineHeight:1 }}>{ag}</span>
+                  <span style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>pages today</span>
+                </div>
+              )}
             </div>
-          )}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          </div>
+
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop: book.coverUrl ? 8 : 0 }}>
             <span style={{ fontFamily:T.body, fontSize:12, color:status.color, display:"flex", alignItems:"center", gap:5 }}>
               {done || status.icon === "ahead"   ? <IconStatusAhead size={16} />   : null}
               {status.icon === "ontrack"         ? <IconStatusOnTrack size={16} /> : null}
@@ -798,14 +809,26 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
       />
 
       <div style={{ padding:"16px 20px 80px" }}>
-        <p style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom: book.author ? 2 : 20 }}>
-          {book.totalPages} pages · Due {fmtShort(parseDate(book.dueDate))}
-        </p>
-        {book.author && (
-          <p style={{ fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic", marginBottom:20 }}>
-            by {book.author}
-          </p>
-        )}
+        {/* Book identity strip */}
+        <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:20 }}>
+          {book.coverUrl && (
+            <img src={book.coverUrl} alt=""
+              style={{ width:48, height:70, objectFit:"cover", borderRadius:8,
+                border:`1px solid ${C.border}`, flexShrink:0,
+                boxShadow:"0 2px 10px rgba(0,0,0,0.12)" }}
+            />
+          )}
+          <div>
+            <p style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom:2 }}>
+              {book.totalPages} pages · Due {fmtShort(parseDate(book.dueDate))}
+            </p>
+            {book.author && (
+              <p style={{ fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
+                by {book.author}
+              </p>
+            )}
+          </div>
+        </div>
 
         {/* Today's goal hero */}
         {!done && (

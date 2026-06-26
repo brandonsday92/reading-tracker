@@ -482,6 +482,9 @@ function AddBook({ onSave, onBack }) {
   const [searching,    setSearching]    = useState(false);
   const [showResults,  setShowResults]  = useState(false);
   const [searchTimer,  setSearchTimer]  = useState(null);
+  const [bookSelected, setBookSelected] = useState(false); // true once user picks from search
+  const [manualMode,   setManualMode]   = useState(false); // true if user opts for manual entry
+  const [searchDone,   setSearchDone]   = useState(false); // true once a search has completed
 
   const shiftDue  = d => setDueCal(c  => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
   const shiftRead = d => setReadCal(c => { let m=c.m+d,y=c.y; if(m>11){m=0;y++} if(m<0){m=11;y--} return {y,m}; });
@@ -489,9 +492,9 @@ function AddBook({ onSave, onBack }) {
 
   const handleQueryChange = (val) => {
     setQuery(val);
-    setTitle(val);
-    setCoverUrl(null);
-    setAuthor("");
+    setBookSelected(false);
+    setSearchDone(false);
+    setCoverUrl(null); setAuthor(""); setTitle(""); setPages("");
     if (searchTimer) clearTimeout(searchTimer);
     if (val.trim().length < 2) { setResults([]); setShowResults(false); return; }
     const timer = setTimeout(() => searchBooks(val), 500);
@@ -513,6 +516,7 @@ function AddBook({ onSave, onBack }) {
       setResults([]);
     }
     setSearching(false);
+    setSearchDone(true);
   };
 
   const selectBook = (book) => {
@@ -520,29 +524,26 @@ function AddBook({ onSave, onBack }) {
     const a = (book.author_name || [])[0] || "";
     const p = book.number_of_pages_median || "";
     const cover = book.cover_i ? `https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg` : null;
-    setQuery(t);
-    setTitle(t);
-    setAuthor(a);
-    setPages(String(p));
-    setCoverUrl(cover);
-    setShowResults(false);
-    setResults([]);
+    setTitle(t); setAuthor(a); setPages(String(p)); setCoverUrl(cover);
+    setBookSelected(true); setShowResults(false); setResults([]);
+    setManualMode(false);
   };
 
-  const clearBook = () => {
+  const clearSearch = () => {
     setQuery(""); setTitle(""); setAuthor(""); setPages(""); setCoverUrl(null);
-    setResults([]); setShowResults(false);
+    setResults([]); setShowResults(false); setBookSelected(false);
+    setManualMode(false); setSearchDone(false);
   };
 
   const handleSave = () => {
     const p  = parseInt(pages);
     const ar = parseInt(alreadyRead) || 0;
+    if (!title.trim())                         return alert("Please enter a book title.");
     if (!p || p < 1)                           return alert("Please enter the total number of pages.");
     if (ar < 0 || ar >= p)                     return alert("Pages already read must be less than the total.");
     if (!dueDate)                              return alert("Please choose a finish date.");
     if (!preset)                               return alert("Please choose your reading days.");
     if (preset==="custom" && !customDays.size)  return alert("Please select at least one day.");
-    const remaining = p - ar;
     const rdays = buildReadingDays(preset, customDays, TODAY, dueDate);
     if (!rdays.length) return alert("No reading days found — try adjusting your schedule.");
     onSave({
@@ -553,7 +554,7 @@ function AddBook({ onSave, onBack }) {
       startingPage: ar,
       dueDate: dkey(dueDate),
       readingDays: rdays,
-      basePPD: Math.ceil(remaining / rdays.length),
+      basePPD: Math.ceil((p - ar) / rdays.length),
     });
   };
 
@@ -564,6 +565,9 @@ function AddBook({ onSave, onBack }) {
     { key:"custom",   label:"Custom days"},
   ];
 
+  // Show the plan fields once a book is confirmed (selected or manual)
+  const showPlanFields = bookSelected || manualMode;
+
   return (
     <div style={{ minHeight:"100vh", background:C.paper }}>
       <TopBar title="New book" onBack={onBack} />
@@ -572,90 +576,123 @@ function AddBook({ onSave, onBack }) {
           Tell us about your book and we'll handle the math.
         </p>
 
-        {/* ── Book search ── */}
-        <Label>Search for your book</Label>
-        <div style={{ position:"relative", marginBottom: showResults ? 0 : 4 }}>
-          <PaceInput
-            type="text" value={query}
-            onChange={e => handleQueryChange(e.target.value)}
-            placeholder="Type a title to search..."
-            style={{ marginBottom: 0, paddingRight: query ? 40 : 15 }}
-          />
-          {query.length > 0 && (
-            <button onClick={clearBook} style={{
-              position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
-              background:"none", border:"none", cursor:"pointer", color:C.secondary,
-              fontSize:18, lineHeight:1, padding:2
-            }}>×</button>
-          )}
-        </div>
-
-        {/* Search results dropdown */}
-        {showResults && (
-          <div style={{
-            background:C.surface, border:`1px solid ${C.border}`, borderRadius:14,
-            boxShadow:C.shadowMd, marginBottom:16, overflow:"hidden"
-          }}>
-            {searching ? (
-              <div style={{ padding:"16px 18px", fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
-                Searching...
-              </div>
-            ) : results.length === 0 ? (
-              <div style={{ padding:"16px 18px", fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
-                No matches found — you can still fill in details manually below.
-              </div>
-            ) : results.map((b, i) => {
-              const cover = b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null;
-              const auth  = (b.author_name || [])[0] || "";
-              return (
-                <div key={i} onClick={() => selectBook(b)} style={{
-                  display:"flex", alignItems:"center", gap:12, padding:"12px 16px",
-                  borderBottom: i < results.length-1 ? `1px solid ${C.border}` : "none",
-                  cursor:"pointer", background:"transparent", transition:"background .1s"
-                }}
-                  onMouseEnter={e => e.currentTarget.style.background = C.paper}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                >
-                  {cover
-                    ? <img src={cover} alt="" style={{ width:36, height:52, objectFit:"cover", borderRadius:4, flexShrink:0, border:`1px solid ${C.border}` }} />
-                    : <div style={{ width:36, height:52, borderRadius:4, background:C.border, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        <IconLogo size={18} />
-                      </div>
-                  }
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.title}</div>
-                    {auth && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:2 }}>{auth}</div>}
-                    {b.number_of_pages_median && (
-                      <div style={{ fontFamily:T.body, fontSize:11, color:C.teal, marginTop:2 }}>{b.number_of_pages_median} pages</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Selected book card */}
-        {coverUrl && !showResults && (
-          <div style={{ display:"flex", alignItems:"center", gap:14, background:C.goldLight, border:`1px solid ${C.gold}`, borderRadius:14, padding:"12px 14px", marginBottom:16 }}>
-            <img src={coverUrl} alt="" style={{ width:40, height:58, objectFit:"cover", borderRadius:6, border:`1px solid ${C.gold}` }} />
-            <div>
-              <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal }}>{title}</div>
-              {author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:2 }}>{author}</div>}
-              <div style={{ fontFamily:T.body, fontSize:12, color:C.teal, marginTop:2 }}>{pages} pages · from Open Library</div>
+        {/* ── SEARCH STATE ── */}
+        {!bookSelected && !manualMode && (
+          <>
+            <Label>Search for your book</Label>
+            <div style={{ position:"relative" }}>
+              <PaceInput
+                type="text" value={query}
+                onChange={e => handleQueryChange(e.target.value)}
+                placeholder="Type a title to search..."
+                style={{ marginBottom:0, paddingRight: query ? 40 : 15 }}
+              />
+              {query.length > 0 && (
+                <button onClick={clearSearch} style={{
+                  position:"absolute", right:12, top:"50%", transform:"translateY(-50%)",
+                  background:"none", border:"none", cursor:"pointer", color:C.secondary,
+                  fontSize:20, lineHeight:1, padding:2
+                }}>×</button>
+              )}
             </div>
+
+            {/* Results dropdown */}
+            {showResults && (
+              <div style={{
+                background:C.surface, border:`1px solid ${C.border}`, borderRadius:14,
+                boxShadow:C.shadowMd, marginTop:4, overflow:"hidden"
+              }}>
+                {searching ? (
+                  <div style={{ padding:"16px 18px", fontFamily:T.heading, fontSize:15, color:C.secondary, fontStyle:"italic" }}>
+                    Searching...
+                  </div>
+                ) : results.map((b, i) => {
+                  const cover = b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null;
+                  const auth  = (b.author_name || [])[0] || "";
+                  return (
+                    <div key={i} onClick={() => selectBook(b)} style={{
+                      display:"flex", alignItems:"center", gap:12, padding:"12px 16px",
+                      borderBottom: i < results.length-1 ? `1px solid ${C.border}` : "none",
+                      cursor:"pointer",
+                    }}
+                      onMouseEnter={e => e.currentTarget.style.background = C.paper}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      {cover
+                        ? <img src={cover} alt="" style={{ width:36, height:52, objectFit:"cover", borderRadius:4, flexShrink:0, border:`1px solid ${C.border}` }} />
+                        : <div style={{ width:36, height:52, borderRadius:4, background:C.border, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                            <IconLogo size={18} />
+                          </div>
+                      }
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:T.body, fontSize:14, fontWeight:500, color:C.charcoal, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.title}</div>
+                        {auth && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:2 }}>{auth}</div>}
+                        {b.number_of_pages_median && <div style={{ fontFamily:T.body, fontSize:11, color:C.teal, marginTop:2 }}>{b.number_of_pages_median} pages</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* "My book isn't here" — show after a search completes */}
+            {searchDone && !searching && (
+              <div style={{ marginTop:12, textAlign:"center" }}>
+                {results.length === 0 && (
+                  <p style={{ fontFamily:T.heading, fontSize:14, color:C.secondary, fontStyle:"italic", marginBottom:10 }}>
+                    No results found.
+                  </p>
+                )}
+                <button onClick={() => setManualMode(true)} style={{
+                  background:"none", border:"none", cursor:"pointer",
+                  fontFamily:T.body, fontSize:13, color:C.teal,
+                  textDecoration:"underline", textDecorationColor: C.border, textUnderlineOffset:3,
+                  padding:"4px 0"
+                }}>My book isn't here — add it manually</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── SELECTED BOOK CARD ── */}
+        {bookSelected && (
+          <div style={{ display:"flex", alignItems:"center", gap:14, background:C.goldLight, border:`1px solid ${C.gold}`, borderRadius:14, padding:"14px 16px", marginBottom:20 }}>
+            {coverUrl
+              ? <img src={coverUrl} alt="" style={{ width:44, height:64, objectFit:"cover", borderRadius:6, border:`1px solid ${C.gold}`, flexShrink:0 }} />
+              : <div style={{ width:44, height:64, borderRadius:6, background:C.goldLight, border:`1px solid ${C.gold}`, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}><IconLogo size={24} /></div>
+            }
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:T.body, fontSize:14, fontWeight:600, color:C.charcoal, marginBottom:2 }}>{title}</div>
+              {author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginBottom:4 }}>{author}</div>}
+              <div style={{ fontFamily:T.body, fontSize:12, color:C.teal }}>{pages} pages · Open Library</div>
+            </div>
+            <button onClick={clearSearch} style={{ background:"none", border:"none", cursor:"pointer", color:C.secondary, fontSize:20, padding:4, flexShrink:0, lineHeight:1 }}>×</button>
           </div>
         )}
 
-        {/* Manual fallback fields — always shown so user can edit or enter manually */}
-        <Label>Book title <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.secondary}}>(edit if needed)</span></Label>
-        <PaceInput type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. The Remains of the Day" />
+        {/* ── MANUAL ENTRY ── */}
+        {manualMode && (
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:"16px 16px 4px", marginBottom:20 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+              <span style={{ fontFamily:T.body, fontSize:13, fontWeight:500, color:C.charcoal }}>Enter book details</span>
+              <button onClick={clearSearch} style={{ background:"none", border:"none", cursor:"pointer", color:C.secondary, fontSize:18, padding:2, lineHeight:1 }}>×</button>
+            </div>
+            <Label>Book title</Label>
+            <PaceInput type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. The Remains of the Day" />
+            <Label>Total pages</Label>
+            <PaceInput type="number" value={pages} onChange={e=>setPages(e.target.value)} placeholder="e.g. 258" min="1" />
+            <Label>Pages already read <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.border}}>(optional)</span></Label>
+            <PaceInput type="number" value={alreadyRead} onChange={e=>setAlreadyRead(e.target.value)} placeholder="e.g. 0" min="0" />
+          </div>
+        )}
 
-        <Label>Total pages</Label>
-        <PaceInput type="number" value={pages} onChange={e=>setPages(e.target.value)} placeholder="e.g. 258" min="1" />
-
-        <Label>Pages already read <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.border}}>(optional — leave blank if starting fresh)</span></Label>
-        <PaceInput type="number" value={alreadyRead} onChange={e=>setAlreadyRead(e.target.value)} placeholder="e.g. 0" min="0" />
+        {/* ── PAGES ALREADY READ (shown after search selection too) ── */}
+        {bookSelected && (
+          <>
+            <Label>Pages already read <span style={{fontWeight:400,textTransform:"none",fontSize:11,color:C.border}}>(optional)</span></Label>
+            <PaceInput type="number" value={alreadyRead} onChange={e=>setAlreadyRead(e.target.value)} placeholder="e.g. 0" min="0" />
+          </>
+        )}
 
         <Label>Finish by</Label>
         <MiniCalendar calState={dueCal} onShift={shiftDue}

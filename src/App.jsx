@@ -24,6 +24,41 @@ const T = {
   body:    "'Inter', -apple-system, sans-serif",
 };
 
+// ─── CSS ANIMATIONS ──────────────────────────────────────────────────────────
+const ANIM_CSS = `
+@keyframes floatUp {
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-40px); }
+}
+@keyframes pulseBadge {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@keyframes fadeSlideUp {
+  0%   { opacity: 0; transform: translateY(18px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes ripple {
+  0%   { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
+}
+@keyframes countDown {
+  0%   { transform: translateY(-8px); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+@keyframes pageFan {
+  0%   { opacity: 0; transform: translateY(12px) rotate(-3deg); }
+  60%  { opacity: 1; transform: translateY(-4px) rotate(1deg); }
+  100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+}
+`;
+if (typeof document !== "undefined") {
+  const style = document.createElement("style");
+  style.textContent = ANIM_CSS;
+  document.head.appendChild(style);
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const TODAY = new Date(); TODAY.setHours(0,0,0,0);
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -774,9 +809,14 @@ function PlanScreen({ book, onStart, onBack }) {
 
 // ─── TRACKER SCREEN ───────────────────────────────────────────────────────────
 function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
-  const [logValue,  setLogValue]  = useState("");
-  const [logDate,   setLogDate]   = useState(toInput(TODAY));
-  const [logMode,   setLogMode]   = useState("pages"); // "pages" | "endpage"
+  const [logValue,   setLogValue]   = useState("");
+  const [logDate,    setLogDate]    = useState(toInput(TODAY));
+  const [logMode,    setLogMode]    = useState("pages");
+  const [toast,      setToast]      = useState(null);   // { text, id }
+  const [rippling,   setRippling]   = useState(false);
+  const [justDone,   setJustDone]   = useState(false);  // triggered on completion
+  const [pulseBadge, setPulseBadge] = useState(false);  // goal-met pulse
+  const [prevLeft,   setPrevLeft]   = useState(null);   // for animated countdown
 
   const left   = Math.max(0, book.totalPages - book.pagesRead);
   const pct    = Math.round((book.pagesRead / book.totalPages) * 100);
@@ -785,10 +825,16 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
   const streak = calcStreak(book);
   const done   = book.pagesRead >= book.totalPages;
   const todayRead      = book.dailyTotals[tkey()] || 0;
-  const todayRemaining = Math.max(0, ag - todayRead); // pages still needed today
+  const todayRemaining = Math.max(0, ag - todayRead);
   const goalMet        = todayRead >= ag;
   const goalRecalc     = ag !== book.basePPD && !done;
   const spineC         = SPINE_COLORS[colorIdx % SPINE_COLORS.length];
+
+  const showToast = (text) => {
+    const id = Date.now();
+    setToast({ text, id });
+    setTimeout(() => setToast(t => t?.id === id ? null : t), 1800);
+  };
 
   const handleLog = () => {
     const val = parseInt(logValue);
@@ -798,7 +844,6 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
     let toLog;
     if (logMode === "endpage") {
-      // "I stopped on page X" — subtract from total already read
       if (val <= book.pagesRead) return alert(`You're already on page ${book.pagesRead}. Enter a page number higher than that.`);
       if (val > book.totalPages)  return alert(`This book only has ${book.totalPages} pages.`);
       toLog = val - book.pagesRead;
@@ -806,18 +851,38 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
       toLog = Math.min(val, left);
     }
 
+    const newPagesRead = book.pagesRead + toLog;
+    const isNowDone    = newPagesRead >= book.totalPages;
+    const wasGoalMet   = todayRead >= ag;
+    const willGoalMet  = (todayRead + toLog) >= ag;
+
     const updated = {
       ...book,
-      pagesRead: book.pagesRead + toLog,
+      pagesRead: newPagesRead,
       dailyTotals: { ...book.dailyTotals, [logDate]: (book.dailyTotals[logDate]||0) + toLog },
       log: [...book.log, {
-        date: logDate,
-        pages: toLog,
+        date: logDate, pages: toLog,
         ts: new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
-        mode: logMode,
-        endPage: logMode === "endpage" ? val : null,
-      }]
+        mode: logMode, endPage: logMode === "endpage" ? val : null,
+      }],
+      ...(isNowDone && !book.completedDate ? { completedDate: tkey() } : {}),
     };
+
+    // Ripple on button
+    setRippling(true);
+    setTimeout(() => setRippling(false), 600);
+
+    // Toast
+    showToast(isNowDone ? "Final page reached 📖" : `+${toLog} pages`);
+
+    // Completion animation
+    if (isNowDone) setTimeout(() => setJustDone(true), 200);
+
+    // Goal-met pulse (only on crossing threshold)
+    if (!wasGoalMet && willGoalMet && !isNowDone) {
+      setTimeout(() => { setPulseBadge(true); setTimeout(() => setPulseBadge(false), 600); }, 300);
+    }
+
     onUpdate(updated);
     setLogValue("");
   };
@@ -920,11 +985,21 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
         )}
 
         {done && (
-          <Card style={{ background:C.sageBg, border:`1px solid ${C.sage}`, textAlign:"center", padding:"28px 20px" }}>
-            <IconLogo size={40} />
-            <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginTop:16, marginBottom:6 }}>You reached the final page.</div>
-            <div style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>{book.title}</div>
-          </Card>
+          <div style={{ animation: justDone ? "pageFan 700ms ease-out forwards" : "fadeSlideUp 400ms ease-out" }}>
+            <Card style={{ background:C.sageBg, border:`1px solid ${C.sage}`, textAlign:"center", padding:"28px 20px" }}>
+              {/* Animated bookmark filling to 100% */}
+              <div style={{ display:"flex", justifyContent:"center", marginBottom:12 }}>
+                <BookmarkProgress pct={100} size={44} />
+              </div>
+              <div style={{ fontFamily:T.heading, fontSize:26, color:C.charcoal, marginBottom:6 }}>You reached the final page.</div>
+              <div style={{ fontFamily:T.body, fontSize:13, color:C.secondary, marginBottom:10 }}>{book.title}</div>
+              {book.completedDate && (
+                <div style={{ fontFamily:T.heading, fontSize:13, color:C.sage, fontStyle:"italic" }}>
+                  Finished {fmtShort(parseDate(book.completedDate))}
+                </div>
+              )}
+            </Card>
+          </div>
         )}
 
         {/* Status & streak row */}
@@ -950,12 +1025,12 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
           <Card style={{ padding:"14px 16px", marginBottom:0 }}>
             <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Pages left</div>
-            <div style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.charcoal }}>{left}</div>
+            <div key={left} style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.charcoal, animation:"countDown 350ms ease-out" }}>{left}</div>
             <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary }}>of {book.totalPages}</div>
           </Card>
           <Card style={{ padding:"14px 16px", marginBottom:0 }}>
             <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".06em", marginBottom:4 }}>Read so far</div>
-            <div style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal }}>{book.pagesRead}</div>
+            <div key={book.pagesRead} style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color:C.teal, animation:"countDown 350ms ease-out" }}>{book.pagesRead}</div>
             <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary }}>{pct}% complete</div>
           </Card>
         </div>
@@ -1018,11 +1093,32 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
               style={{ marginBottom:0 }}
             />
           </div>
-          <button onClick={handleLog} style={{
-            padding:"13px 16px", background:C.teal, border:"none", borderRadius:14,
-            color:"#fff", cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
-            display:"flex", alignItems:"center", justifyContent:"center"
-          }}><IconLogReading size={22} color="#fff" /></button>
+          {/* Log button with ripple effect */}
+          <div style={{ position:"relative", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:0 }}>
+            {rippling && (
+              <span style={{
+                position:"absolute", width:44, height:44, borderRadius:"50%",
+                background:C.teal, opacity:0.3,
+                animation:"ripple 600ms ease-out forwards", pointerEvents:"none"
+              }}/>
+            )}
+            <button onClick={handleLog} style={{
+              padding:"13px 16px", background:C.teal, border:"none", borderRadius:14,
+              color:"#fff", cursor:"pointer", lineHeight:1, boxShadow:C.shadow,
+              display:"flex", alignItems:"center", justifyContent:"center", position:"relative", zIndex:1
+            }}><IconLogReading size={22} color="#fff" /></button>
+            {/* Floating toast */}
+            {toast && (
+              <div key={toast.id} style={{
+                position:"absolute", bottom:"calc(100% + 10px)", left:"50%",
+                transform:"translateX(-50%)",
+                background:C.charcoal, color:"#fff",
+                fontFamily:T.body, fontSize:12, fontWeight:500,
+                padding:"6px 12px", borderRadius:20, whiteSpace:"nowrap",
+                animation:"floatUp 1.8s ease-out forwards", pointerEvents:"none", zIndex:10
+              }}>{toast.text}</div>
+            )}
+          </div>
         </div>
 
         {logMode === "endpage" && book.pagesRead > 0 && (
@@ -1033,7 +1129,14 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
 
         {/* Today's status */}
         {todayRead > 0 && !done && (
-          <div style={{ fontFamily:T.body, fontSize:13, marginTop:10, padding:"10px 14px", borderRadius:12, background: goalMet ? C.sageBg : C.terraBg, border:`1px solid ${goalMet ? C.sage : C.terra}`, color: goalMet ? C.sage : C.terra }}>
+          <div style={{
+            fontFamily:T.body, fontSize:13, marginTop:10, padding:"10px 14px", borderRadius:12,
+            background: goalMet ? C.sageBg : C.terraBg,
+            border:`1px solid ${goalMet ? C.sage : C.terra}`,
+            color: goalMet ? C.sage : C.terra,
+            animation: pulseBadge ? "pulseBadge 600ms ease-in-out" : "none",
+            transition: "background 600ms ease, color 600ms ease, border-color 600ms ease",
+          }}>
             {goalMet
               ? `Today's goal met — ${todayRead} pages read today.`
               : `${todayRead} of ${ag} pages today — ${todayRemaining} to go.`}
@@ -1071,9 +1174,206 @@ function Tracker({ book, onUpdate, onBack, onDelete, colorIdx }) {
   );
 }
 
+// ─── STATS HELPERS ───────────────────────────────────────────────────────────
+function computeStats(books) {
+  const allLogs = books.flatMap(b => b.log || []);
+
+  // Total pages read across all books
+  const totalPagesRead = books.reduce((s, b) => s + (b.pagesRead || 0), 0);
+
+  // Books completed
+  const completed = books.filter(b => b.pagesRead >= b.totalPages);
+  const completedCount = completed.length;
+
+  // On-time rate
+  const onTime = completed.filter(b => {
+    if (!b.completedDate || !b.dueDate) return false;
+    return b.completedDate <= b.dueDate;
+  }).length;
+  const onTimeRate = completedCount > 0 ? Math.round((onTime / completedCount) * 100) : null;
+
+  // Average pages/day over last 7 and 30 days
+  const dayTotals = {};
+  allLogs.forEach(e => { dayTotals[e.date] = (dayTotals[e.date] || 0) + e.pages; });
+  const avg = (days) => {
+    let total = 0, count = 0;
+    for (let i = 0; i < days; i++) {
+      const d = new Date(TODAY); d.setDate(d.getDate() - i);
+      const k = dkey(d);
+      if (dayTotals[k]) { total += dayTotals[k]; count++; }
+    }
+    return count > 0 ? Math.round(total / days) : 0;
+  };
+  const avg7  = avg(7);
+  const avg30 = avg(30);
+
+  // Best reading day of week
+  const byDow = [0,0,0,0,0,0,0];
+  allLogs.forEach(e => {
+    const d = parseDate(e.date);
+    byDow[d.getDay()] += e.pages;
+  });
+  const bestDow = byDow.indexOf(Math.max(...byDow));
+  const DOW_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const bestDay = Math.max(...byDow) > 0 ? DOW_NAMES[bestDow] : null;
+
+  // All-time best streak across all books
+  let bestStreak = 0;
+  books.forEach(b => {
+    const s = calcStreak(b);
+    if (s > bestStreak) bestStreak = s;
+  });
+
+  // Total reading sessions
+  const sessions = allLogs.length;
+
+  return { totalPagesRead, completedCount, onTimeRate, avg7, avg30, bestDay, bestStreak, sessions };
+}
+
+// ─── STATS SCREEN ────────────────────────────────────────────────────────────
+function Stats({ books, onBack }) {
+  const s = computeStats(books);
+  const completed = books.filter(b => b.pagesRead >= b.totalPages);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.paper, paddingBottom:80 }}>
+      <div style={{ padding:"24px 20px 0", display:"flex", alignItems:"center", gap:10 }}>
+        <IconLogo size={22} />
+        <span style={{ fontFamily:T.heading, fontSize:24, fontWeight:500, color:C.charcoal }}>Reading stats</span>
+      </div>
+
+      <div style={{ padding:"20px 20px 0" }}>
+        {books.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"3rem 1rem" }}>
+            <div style={{ fontFamily:T.heading, fontSize:22, color:C.secondary, fontStyle:"italic", marginBottom:8 }}>
+              Nothing to show yet.
+            </div>
+            <div style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>
+              Add a book and start reading to see your stats here.
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Hero stat */}
+            <div style={{ background:C.teal, borderRadius:20, padding:"24px 22px", marginBottom:14, boxShadow:C.shadowMd }}>
+              <div style={{ fontFamily:T.body, fontSize:11, color:"rgba(255,255,255,.6)", textTransform:"uppercase", letterSpacing:".08em", marginBottom:6 }}>Total pages read</div>
+              <div style={{ fontFamily:T.body, fontSize:56, fontWeight:700, color:"#fff", lineHeight:1 }}>{s.totalPagesRead.toLocaleString()}</div>
+              <div style={{ fontFamily:T.heading, fontSize:16, color:"rgba(255,255,255,.65)", fontStyle:"italic", marginTop:6 }}>across {s.sessions} reading session{s.sessions !== 1 ? "s" : ""}</div>
+            </div>
+
+            {/* 2-col stats */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+              <StatMini label="Books finished" value={s.completedCount} sub={s.completedCount === 1 ? "book" : "books"} />
+              <StatMini label="Best streak" value={s.bestStreak} sub="days in a row" color={s.bestStreak > 0 ? C.gold : undefined} />
+              <StatMini label="Avg pages/day" value={s.avg7 || "—"} sub="last 7 days" />
+              <StatMini label="Avg pages/day" value={s.avg30 || "—"} sub="last 30 days" />
+            </div>
+
+            {/* On-time rate */}
+            {s.onTimeRate !== null && (
+              <Card style={{ marginBottom:10, padding:"16px 18px" }}>
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:8 }}>Finished on time</div>
+                <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:10 }}>
+                  <span style={{ fontFamily:T.body, fontSize:36, fontWeight:600, color: s.onTimeRate >= 80 ? C.sage : s.onTimeRate >= 50 ? C.gold : C.terra }}>{s.onTimeRate}%</span>
+                  <span style={{ fontFamily:T.body, fontSize:13, color:C.secondary }}>of books completed on time</span>
+                </div>
+                <div style={{ height:6, background:C.border, borderRadius:3, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${s.onTimeRate}%`, background: s.onTimeRate >= 80 ? C.sage : s.onTimeRate >= 50 ? C.gold : C.terra, borderRadius:3, transition:"width 1s ease" }} />
+                </div>
+              </Card>
+            )}
+
+            {/* Best reading day */}
+            {s.bestDay && (
+              <Card style={{ marginBottom:10, padding:"16px 18px" }}>
+                <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>Most productive day</div>
+                <div style={{ fontFamily:T.heading, fontSize:28, color:C.charcoal, fontWeight:500 }}>{s.bestDay}</div>
+                <div style={{ fontFamily:T.heading, fontSize:13, color:C.secondary, fontStyle:"italic", marginTop:2 }}>You tend to read most on {s.bestDay}s</div>
+              </Card>
+            )}
+
+            {/* Completed books list */}
+            {completed.length > 0 && (
+              <>
+                <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", margin:"16px 0 10px" }}>Finished books</div>
+                {completed.map((b, i) => {
+                  const spineC = SPINE_COLORS[books.indexOf(b) % SPINE_COLORS.length];
+                  const onTime = b.completedDate && b.dueDate && b.completedDate <= b.dueDate;
+                  return (
+                    <div key={b.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 0", borderBottom: i < completed.length-1 ? `1px solid ${C.border}` : "none" }}>
+                      {b.coverUrl
+                        ? <img src={b.coverUrl} alt="" style={{ width:36, height:52, objectFit:"cover", borderRadius:5, border:`1px solid ${C.border}`, flexShrink:0 }} />
+                        : <div style={{ width:4, alignSelf:"stretch", background:spineC, borderRadius:2, flexShrink:0 }} />
+                      }
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontFamily:T.heading, fontSize:16, color:C.charcoal, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.title}</div>
+                        {b.author && <div style={{ fontFamily:T.body, fontSize:12, color:C.secondary, marginTop:1 }}>{b.author}</div>}
+                        <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, marginTop:2 }}>
+                          {b.totalPages} pages {b.completedDate ? `· finished ${fmtShort(parseDate(b.completedDate))}` : ""}
+                        </div>
+                      </div>
+                      <div style={{ fontFamily:T.body, fontSize:11, padding:"4px 10px", borderRadius:12, background: onTime ? C.sageBg : C.terraBg, color: onTime ? C.sage : C.terra, flexShrink:0 }}>
+                        {onTime ? "On time" : "Late"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatMini({ label, value, sub, color }) {
+  return (
+    <Card style={{ padding:"14px 16px", marginBottom:0 }}>
+      <div style={{ fontFamily:T.body, fontSize:10, color:C.secondary, textTransform:"uppercase", letterSpacing:".07em", marginBottom:4 }}>{label}</div>
+      <div style={{ fontFamily:T.body, fontSize:28, fontWeight:600, color: color || C.charcoal, lineHeight:1 }}>{value}</div>
+      <div style={{ fontFamily:T.body, fontSize:11, color:C.secondary, marginTop:3 }}>{sub}</div>
+    </Card>
+  );
+}
+
+// ─── BOTTOM NAV ───────────────────────────────────────────────────────────────
+function BottomNav({ tab, onTab }) {
+  const tabs = [
+    { key:"shelf", icon:<IconShelf size={22} />, label:"Shelf" },
+    { key:"stats", icon:<IconHistory size={22} />, label:"Stats" },
+  ];
+  return (
+    <div style={{
+      position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
+      width:"100%", maxWidth:480,
+      background:C.surface, borderTop:`1px solid ${C.border}`,
+      display:"flex", zIndex:100,
+      paddingBottom:"env(safe-area-inset-bottom, 0px)",
+    }}>
+      {tabs.map(t => (
+        <button key={t.key} onClick={() => onTab(t.key)} style={{
+          flex:1, padding:"10px 0 8px", background:"none", border:"none", cursor:"pointer",
+          display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+          color: tab === t.key ? C.teal : C.secondary,
+          transition:"color .15s",
+        }}>
+          <span style={{ color: tab === t.key ? C.teal : C.secondary, display:"flex" }}>
+            {t.icon}
+          </span>
+          <span style={{ fontFamily:T.body, fontSize:10, fontWeight: tab===t.key ? 600 : 400, letterSpacing:".04em" }}>
+            {t.label.toUpperCase()}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,      setScreen]      = useState("shelf");
+  const [tab,         setTab]         = useState("shelf"); // "shelf" | "stats"
   const [books,       setBooks]       = useState(() => loadBooks());
   const [curId,       setCurId]       = useState(null);
   const [pendingBook, setPendingBook] = useState(null);
@@ -1103,11 +1403,32 @@ export default function App() {
     setBooks(prev => prev.filter(b => b.id !== curId));
     setCurId(null);
     setScreen("shelf");
+    setTab("shelf");
   };
 
-  if (screen==="shelf") return <Shelf books={books} onOpen={id=>{setCurId(id);setScreen("track");}} onAdd={()=>setScreen("add")} />;
-  if (screen==="add")   return <AddBook onSave={handleSaveBook} onBack={()=>setScreen("shelf")} />;
-  if (screen==="plan" && pendingBook) return <PlanScreen book={pendingBook} onStart={handleStartTracker} onBack={()=>setScreen("add")} />;
-  if (screen==="track" && curBook)    return <Tracker book={curBook} onUpdate={handleUpdateBook} onBack={()=>setScreen("shelf")} onDelete={handleDeleteBook} colorIdx={colorIdx} />;
-  return null;
+  const handleTab = (t) => { setTab(t); setScreen("shelf"); };
+
+  // Screens that show the bottom nav
+  const showNav = screen === "shelf";
+
+  return (
+    <>
+      {screen === "shelf" && tab === "shelf" && (
+        <Shelf books={books} onOpen={id=>{setCurId(id);setScreen("track");}} onAdd={()=>setScreen("add")} />
+      )}
+      {screen === "shelf" && tab === "stats" && (
+        <Stats books={books} />
+      )}
+      {screen === "add" && (
+        <AddBook onSave={handleSaveBook} onBack={()=>setScreen("shelf")} />
+      )}
+      {screen === "plan" && pendingBook && (
+        <PlanScreen book={pendingBook} onStart={handleStartTracker} onBack={()=>setScreen("add")} />
+      )}
+      {screen === "track" && curBook && (
+        <Tracker book={curBook} onUpdate={handleUpdateBook} onBack={()=>setScreen("shelf")} onDelete={handleDeleteBook} colorIdx={colorIdx} />
+      )}
+      {showNav && <BottomNav tab={tab} onTab={handleTab} />}
+    </>
+  );
 }
